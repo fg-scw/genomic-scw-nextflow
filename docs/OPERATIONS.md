@@ -1,52 +1,29 @@
-# Exploitation, reprise et destruction
+# Exploitation
 
-## État Terraform
-
-Le backend est un bucket Object Storage créé avant `terraform init` par `make bootstrap-state`, distinct des buckets de données et avec versioning activé. `STATE_PROJECT_ID` est passé explicitement au CLI Scaleway; la sélection de projet par défaut du profil n'est pas utilisée pour cette création. Chaque root Terraform utilise une clé d'état dédiée et `use_lockfile=true`. Ce mode de verrouillage nécessite les droits Get/Put/Delete sur chaque objet `.tflock`. Garder les fichiers `backend.hcl` hors Git et n'y inscrire aucun secret. Les credentials S3 backend sont chargés depuis Scaleway Secret Manager dans l'environnement courant, suivant la procédure générique du [README](../README.md#préparer-la-configuration); les identifiants de projet et paramètres non secrets sont dans les fichiers `terraform.tfvars` locaux.
-
-Les permission sets S3 de Scaleway, y compris ceux de l'identité backend (`ObjectStorageBucketsRead`, `ObjectStorageObjectsRead`, `ObjectStorageObjectsWrite` et `ObjectStorageObjectsDelete`), s'appliquent au niveau projet. Une bucket policy ne remplace pas cette portée IAM. Ne pas ajouter de données sans rapport à ce projet; pour un déploiement production, isoler le backend dans un projet Scaleway distinct ou établir des protections de ressources explicites pour les autres buckets.
-
-Si un `terraform apply` est interrompu, lire la sortie et l'état avant de recommencer. Initialiser les deux roots avec leur backend, lancer `plan`, puis appliquer seulement le plan revu. Ne pas supprimer manuellement les objets `.tflock` et ne pas lancer `force-unlock` sans confirmer que le processus ayant acquis le verrou est terminé et que l'identifiant correspond.
-
-Les valeurs `sensitive` masquent certaines sorties CLI; elles ne chiffrent pas le state. Limiter les accès au bucket backend et aux versions de state comme à des secrets d'infrastructure.
-
-## Rétablir l'accès au cluster
-
-Après création ou remplacement du cluster, réinstaller son kubeconfig Scaleway avant de gérer les objets Kubernetes :
+## Cluster et jobs
 
 ```bash
 make kubeconfig
-kubectl get nodes -o wide
-kubectl get pvc -n bioinformatics
-```
-
-Le kubeconfig est local et ne doit pas être commité. En cas d'échec d'une ressource Kubernetes, consulter `kubectl describe`, les événements du namespace et les logs du pod concerné avant de relancer Terraform.
-
-## Diagnostiquer et reprendre un run
-
-Conserver l'identifiant de run utilisé pour préparer les entrées et lancer le pipeline. Il désigne une samplesheet et une destination de sortie stables. Pour un échec, examiner le Job Nextflow, le journal de tête et les pods qui ont échoué :
-
-```bash
-kubectl get jobs,pods -n bioinformatics -o wide
-kubectl describe job -n bioinformatics <job>
+make status
 kubectl logs -n bioinformatics job/<job>
+kubectl describe job -n bioinformatics <job>
 kubectl get events -n bioinformatics --sort-by=.lastTimestamp
 ```
 
-Ne pas reprendre aveuglément un run dont un résultat intermédiaire est erroné. Un hit de cache Nextflow peut réutiliser une sortie invalide. Corriger la cause, vérifier le workdir et ne lancer `make run-pipeline RUN_ID=<id> RESUME=1` que si la reprise est voulue et les fichiers intermédiaires sont cohérents. La validation finale vérifie la présence et la taille des principaux artefacts ainsi que le rapport MultiQC; un biologiste reste responsable de l'interprétation scientifique.
+Pour reprendre un run, conserver le même `RUN_ID` et ne passer `RESUME=1` qu'après contrôle du workdir et des sorties intermédiaires :
 
-## Préserver les données avant destruction
+```bash
+make run-pipeline RUN_ID=<run-id> RESUME=1
+```
 
-Le teardown est volontairement interactif. Avant de détruire :
+## Préserver et détruire
 
-1. Arrêter les nouveaux runs et attendre ou annuler explicitement les Jobs actifs.
-2. Inventorier les objets des buckets d'entrée et de résultats; copier les données à conserver vers un emplacement de sauvegarde distinct et vérifier le nombre d'objets et la taille copiée.
-3. Sauvegarder les références et données de travail SFS nécessaires à une reprise. Les PVC peuvent être détruits avec les ressources Kubernetes ou le cluster.
-4. Vérifier que le bucket et les objets de backend Terraform sont conservés.
-5. Détruire d'abord les ressources Kubernetes, puis l'infrastructure Kapsule, en examinant chaque plan de destruction.
+Avant `make destroy`, arrêter les nouveaux runs, attendre ou annuler les jobs actifs, sauvegarder les données S3 et les données SFS à conserver, puis vérifier le backend distant. La cible détruit d'abord les ressources Kubernetes puis l'infrastructure et demande confirmation Terraform. Les PVC peuvent contenir des références et des fichiers de travail; leur destruction n'est pas une purge sélective. Le bucket de state est externe au Terraform de l'application et doit être conservé.
 
-Ne pas vider un bucket d'entrée/résultats ni désactiver sa protection contre la destruction pour rendre un `destroy` possible. Les buckets de données sont versionnés : les versions courantes ne sont pas supprimées automatiquement; les versions remplacées expirent après 365 jours par défaut, valeur réglable, et les uploads multipart incomplets après 7 jours. Si Terraform refuse de supprimer un bucket non vide, garder ce bucket et ses données; procéder à une purge séparée uniquement selon la politique de rétention approuvée.
+Les buckets de données ont le versioning activé. Les versions courantes ne sont pas purgées automatiquement; les versions remplacées expirent après 365 jours par défaut et les uploads multipart incomplets après 7 jours. Un bucket non vide peut empêcher sa suppression par Terraform. Ne pas vider de bucket pour faire réussir `destroy`.
 
-## Restauration
+## État distant
 
-Pour restaurer, récupérer une version connue du state backend uniquement après avoir gelé les opérations Terraform et vérifié l'horodatage/la version à restaurer. Restaurer les jeux de données depuis leur copie vérifiée, déployer l'infrastructure et la plateforme, réinstaller le kubeconfig, réinjecter le secret de pipeline depuis Scaleway Secret Manager, puis exécuter un run de validation avec un nouvel identifiant. Ne jamais remplacer le state courant à l'aveugle : une sauvegarde de l'objet actuel est requise avant toute restauration.
+Les deux racines Terraform ont des clés distinctes et utilisent `use_lockfile=true`. Ne pas supprimer manuellement `.tflock` ni lancer `force-unlock` avant d'avoir confirmé que le détenteur est terminé. Les permissions du backend sont au niveau projet Scaleway; protéger l'ensemble du projet, pas uniquement le bucket de state.
+
+Pour une restauration, geler les opérations Terraform, conserver une copie du state courant, restaurer une version vérifiée du state et faire un `plan` avant tout `apply`.

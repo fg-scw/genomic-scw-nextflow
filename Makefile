@@ -30,7 +30,26 @@ init: ## Bootstrap the backend bucket then initialize both Terraform roots
 	$(MAKE) platform-init
 
 bootstrap-state: ## Create a private versioned state bucket before Terraform init
-	STATE_BUCKET="$(STATE_BUCKET)" STATE_PROJECT_ID="$(STATE_PROJECT_ID)" STATE_REGION="$(STATE_REGION)" bash $(SCRIPTS_DIR)/bootstrap-state.sh
+	@test -n "$(STATE_BUCKET)" || { printf 'Set STATE_BUCKET to the dedicated Terraform state bucket name.\n' >&2; exit 2; }
+	@test -n "$(STATE_PROJECT_ID)" || { printf 'Set STATE_PROJECT_ID to the Scaleway project UUID for the state bucket.\n' >&2; exit 2; }
+	@printf '%s\n' "$(STATE_PROJECT_ID)" | grep -Eq '^[0-9a-fA-F-]{36}$$' || { printf 'STATE_PROJECT_ID must be a UUID.\n' >&2; exit 2; }
+	@if scw object bucket get "$(STATE_BUCKET)" project-id="$(STATE_PROJECT_ID)" region="$(STATE_REGION)" >/dev/null 2>&1; then \
+	  printf 'State bucket already exists: %s\n' "$(STATE_BUCKET)"; \
+	else \
+	  printf 'Creating private, versioned state bucket %s in project %s.\n' "$(STATE_BUCKET)" "$(STATE_PROJECT_ID)"; \
+	  scw object bucket create "$(STATE_BUCKET)" enable-versioning=true acl=private project-id="$(STATE_PROJECT_ID)" region="$(STATE_REGION)"; \
+	fi
+	@status=$$(aws --endpoint-url "https://s3.$(STATE_REGION).scw.cloud" --region "$(STATE_REGION)" \
+	  s3api get-bucket-versioning --bucket "$(STATE_BUCKET)" --query Status --output text 2>/dev/null || true); \
+	if [ "$$status" != Enabled ]; then \
+	  aws --endpoint-url "https://s3.$(STATE_REGION).scw.cloud" --region "$(STATE_REGION)" \
+	    s3api put-bucket-versioning --bucket "$(STATE_BUCKET)" \
+	    --versioning-configuration Status=Enabled; \
+	fi
+	@status=$$(aws --endpoint-url "https://s3.$(STATE_REGION).scw.cloud" --region "$(STATE_REGION)" \
+	  s3api get-bucket-versioning --bucket "$(STATE_BUCKET)" --query Status --output text) && \
+	  test "$$status" = Enabled || { printf 'Versioning is not enabled for state bucket %s.\n' "$(STATE_BUCKET)" >&2; exit 1; }
+	@printf 'State bucket ready: %s (%s, versioning enabled)\n' "$(STATE_BUCKET)" "$(STATE_REGION)"
 
 infra-init: ## Initialize the Scaleway infrastructure Terraform root
 	$(TF) -chdir=$(INFRA_DIR) init -input=false -backend-config=backend.hcl
