@@ -8,17 +8,36 @@ Le pipeline utilise `nf-k8s` 1.2.2, `nf-amazon` 3.4.1 et GRCh38 Ensembl 110. Les
 
 ```mermaid
 flowchart LR
-  tf[Terraform] --> vpc[VPC et Private Network]
-  tf --> k8s[Kapsule 1.37.0<br/>pool orchestrateur + pool calcul]
-  tf --> sfs[SFS RWX<br/>workdir + référence]
-  tf --> s3[Object Storage<br/>input + résultats]
-  tf --> sm[Secret Manager<br/>clé S3 pipeline]
-  k8s --> platform[Namespace, RBAC, PVC et Job Nextflow]
-  sfs --> platform
-  s3 <--> platform
-  sm --> secret[Secret Kubernetes]
-  secret --> platform
-  tf --> state[Bucket Terraform<br/>state + lockfile]
+  subgraph SCW["Projet hcl-nextflow · fr-par-3"]
+    subgraph K["Kapsule 1.37.0"]
+      subgraph O["Pool orchestrator"]
+        REF["Job bootstrap<br/>GRCh38 Ensembl 110"]
+      end
+      subgraph C["Pool star-compute"]
+        HEAD["Job head Nextflow"]
+        TASKS["Pods de tâches nf-core<br/>dont STAR"]
+      end
+    end
+    WORK[("SFS RWX<br/>workdir · 200 Go")]
+    REFVOL[("SFS RWX<br/>référence · 50 Go")]
+    INPUT[("Object Storage<br/>FASTQ d'entrée")]
+    RESULTS[("Object Storage<br/>résultats")]
+    BLOCK["Block Storage sbs_5k<br/>disques système des nœuds<br/>pas le workdir/référence"]
+    NVME["GEN3 MEMORY NVMe<br/>option scratch · non déployée"]
+  end
+
+  REF -->|"écrit la référence"| REFVOL
+  REFVOL -->|"lecture seule"| TASKS
+  HEAD -->|"orchestration"| TASKS
+  HEAD <-->|"workdir / reprise"| WORK
+  TASKS <-->|"workdir / reprise"| WORK
+  INPUT -->|"lecture"| TASKS
+  TASKS -->|"écriture"| RESULTS
+  O -->|"disques système"| BLOCK
+  C -->|"disques système"| BLOCK
+  TASKS -.->|"benchmark futur; montage explicite requis"| NVME
+  classDef optional stroke-dasharray: 5 5;
+  class NVME optional;
 ```
 
 ## Workflow
@@ -104,3 +123,17 @@ Le POC vérifie un petit run humain avec un PVC workdir SFS de 200 Go et une ré
 Avant toute production, faire un benchmark représentatif STAR, dimensionner SFS/autoscaling, tester reprise et restauration, définir rétention/observabilité, et faire valider les métriques QC. Les permissions IAM objet sont à l'échelle du projet : séparer aussi le backend Terraform dans un projet isolé ou protéger explicitement les autres buckets.
 
 Les instances GEN3 MEMORY offrent une option de benchmark scratch NVMe local; elle n'est pas activée ici. Voir [Préparation production](docs/PRODUCTION-READINESS.md). Les opérations de reprise et destruction sont dans [Exploitation](docs/OPERATIONS.md).
+
+## Observations du pilote — 25 septembre 2026 (UTC)
+
+| Timestamp UTC | Étape | Résultat observé | Pool |
+|---|---|---|---|
+| 13:47:37–14:46:37 | Bootstrap de la référence | Job GRCh38 Ensembl 110 terminé. | orchestrator |
+| 15:00:27 | Premier Job Nextflow | Démarrage du run; une tâche STAR de tri apparaît à 15:36:59. | star-compute |
+| ≈16:07 | Éviction autoscaler | Head évincé; le pod STAR porte un `deletionTimestamp` à 16:06:50. | star-compute |
+| 16:19:06–16:19:56 | Reprise | Job/head puis pod STAR recréés; caches Nextflow réutilisés. | star-compute |
+| 16:27:49 | Index STAR | Nouvelle étape de génération d'index observée. | star-compute |
+| 16:43:46 | Étape STAR de tri | Étape observée après la reprise. | star-compute |
+| ≈17:05 | Écriture `SA_*` | Écriture observée; Job encore `Running` lors de la capture de 17:41. | star-compute |
+
+La validation e2e reste à confirmer : aucun succès final n'est enregistré dans cette chronologie.
