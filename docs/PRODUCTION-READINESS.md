@@ -19,6 +19,7 @@ Mesures faites depuis le pod head Nextflow sur `star-compute`, pendant une écri
 | S3, GET FASTQ réel (2 628 433 octets) | 0,179 / 0,103 / 0,095 s. |
 | SFS virtiofs, PVC 200 Go | Écriture 64 MiB + `fsync`: 8,035 s (8,0 MiB/s); lecture après `POSIX_FADV_DONTNEED`: 8,977 s (7,1 MiB/s). `fsync` 4 KiB × 20 : p50 23,22 ms, p95 23,91 ms. |
 | STAR, fichier `SA` | Croissance de 18,9 à 20,8 Go en 87 s, environ 22 MB/s. |
+| STAR, lecture réelle du génome depuis SFS | `Genome` 3 219 295 493 B + `SA` 24 990 345 232 B + `SAindex` 1 565 873 619 B (29,8 GB) chargés de 18:59:56 à 19:22:29 UTC : 22 min 33 s, ~22 MB/s overhead inclus. |
 | `/tmp` overlay du conteneur | Baseline 64 MiB : écriture 0,092 s, lecture 0,066 s; `fsync` 4 KiB : p50 1,70 ms. |
 
 Ces mesures forment une seule série sur un seul échantillon, avec STAR en charge. `curl` ne passe pas par le plugin S3 Nextflow; `POSIX_FADV_DONTNEED` ne garantit pas l'absence de cache. `/tmp` est l'overlay du conteneur, pas un benchmark Block Storage. Les disques système Block Storage sbs_5k et le scratch NVMe GEN3 n'ont pas été benchmarkés directement. Le bucket temporaire et les fichiers de test ont été supprimés.
