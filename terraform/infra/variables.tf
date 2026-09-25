@@ -80,7 +80,7 @@ variable "compute_max_nodes" {
 variable "workdir_size_gb" {
   description = "SFS RWX capacity for Nextflow work files. Set to about 2000 GB for production throughput."
   type        = number
-  default     = 100
+  default     = 200
 
   validation {
     condition     = var.workdir_size_gb >= 25 && var.workdir_size_gb <= 50000

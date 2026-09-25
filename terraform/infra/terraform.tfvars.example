@@ -15,7 +15,7 @@ orchestrator_node_type = "POP2-4C-16G"
 orchestrator_max_nodes = 2
 compute_node_type      = "POP2-HM-8C-64G"
 compute_max_nodes      = 2
-workdir_size_gb        = 100
+workdir_size_gb        = 200
 reference_size_gb      = 50
 noncurrent_version_retention_days = 365
 

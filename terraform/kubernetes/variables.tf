@@ -13,7 +13,7 @@ variable "namespace" {
 variable "workdir_size_gb" {
   description = "SFS capacity requested by nf-workdir-pvc; keep aligned with infra/terraform.tfvars."
   type        = number
-  default     = 100
+  default     = 200
 
   validation {
     condition     = var.workdir_size_gb >= 25 && var.workdir_size_gb <= 50000

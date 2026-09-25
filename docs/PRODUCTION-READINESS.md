@@ -4,7 +4,7 @@
 
 Le dépôt déploie le projet Scaleway `hcl-nextflow` (SA-Demo, `fr-par-3`) et un pipeline RNA-seq de démonstration sur Kapsule 1.37.0. Le run `validation-20260925` est en cours; le POC ne sera validé qu'après succès de `make validate-run` et inspection des artefacts.
 
-Les valeurs par défaut sont destinées à un pilote : pools orchestrateur POP2-4C-16G et calcul POP2-HM-8C-64G, jusqu'à deux nœuds chacun; PVC SFS 100 Go workdir et 50 Go référence. Le jeu d'essai est limité à 50 000 paires. Les volumes visés de 300–400 échantillons / 2,2 To ne sont pas qualifiés.
+Les valeurs par défaut sont destinées à un pilote : pools orchestrateur POP2-4C-16G et calcul POP2-HM-8C-64G, jusqu'à deux nœuds chacun; PVC SFS 200 Go workdir et 50 Go référence. Le workdir a été augmenté de 100 à 200 Go après un débit observé proche du débit nominal SFS du volume de 100 Go; le gain de performance reste à mesurer sur un nouveau run. Le jeu d'essai est limité à 50 000 paires. Les volumes visés de 300–400 échantillons / 2,2 To ne sont pas qualifiés.
 
 ## Avant données de production
 

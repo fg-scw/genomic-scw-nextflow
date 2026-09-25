@@ -99,7 +99,7 @@ make smoke-test RUN_ID=validation-20260925 RESUME=1
 
 ## POC et production
 
-Le POC vérifie un petit run humain. La validation e2e du projet doit être confirmée par l'exécution effective et les contrôles ci-dessus. Les pools et PVC par défaut sont petits; les volumes de 300–400 échantillons ou 2,2 To, la reprise après panne, le débit SFS, les coûts et la restauration ne sont pas qualifiés.
+Le POC vérifie un petit run humain avec un PVC workdir SFS de 200 Go et une référence de 50 Go. La capacité workdir a été augmentée pour tester un possible goulot SFS; le gain de débit reste à mesurer. La validation e2e du projet doit être confirmée par l'exécution effective et les contrôles ci-dessus. Les pools et PVC par défaut sont dimensionnés pour le pilote; les volumes de 300–400 échantillons ou 2,2 To, la reprise après panne, les coûts et la restauration ne sont pas qualifiés.
 
 Avant toute production, faire un benchmark représentatif STAR, dimensionner SFS/autoscaling, tester reprise et restauration, définir rétention/observabilité, et faire valider les métriques QC. Les permissions IAM objet sont à l'échelle du projet : séparer aussi le backend Terraform dans un projet isolé ou protéger explicitement les autres buckets.
 
