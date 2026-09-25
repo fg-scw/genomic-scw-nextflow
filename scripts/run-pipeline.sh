@@ -131,6 +131,7 @@ kubectl create job "$JOB" -n "$NS" --image="$NEXTFLOW_IMAGE" --dry-run=client -o
       .spec.backoffLimit = 0 |
       .spec.ttlSecondsAfterFinished = 86400 |
       .spec.activeDeadlineSeconds = $timeout |
+      .spec.template.metadata.annotations = ((.spec.template.metadata.annotations // {}) + {"cluster-autoscaler.kubernetes.io/safe-to-evict": "false"}) |
       .spec.template.spec.serviceAccountName = "nextflow" |
       .spec.template.spec.automountServiceAccountToken = true |
       .spec.template.spec.nodeSelector = {"k8s.scaleway.com/pool-name": "star-compute"} |
