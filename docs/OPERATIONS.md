@@ -26,6 +26,7 @@ make run-pipeline RUN_ID=<run-id> RESUME=1
 | Conflit de nom ou rapports obsolètes pendant `-resume` | `-name` imposé ou Nextflow refuse d'écraser les fichiers trace/report/timeline existants. | Garder le même `RUN_ID`/workdir sans `-name`; activer `report.overwrite = true`, `timeline.overwrite = true` et `trace.overwrite = true`. |
 | Autoscaler évince le head Nextflow | Pod head considéré comme évictable. | Annoter le head `cluster-autoscaler.kubernetes.io/safe-to-evict: "false"`. |
 | STAR rapporte moins de 50 000 entrées sur le sous-ensemble démo | TrimGalore élimine quelques reads avant l'alignement. | Le validateur exige au moins 45 000 entrées STAR (90 % des 50 000 paires brutes) et affiche séparément le sous-ensemble brut et le compte après trimming. |
+| `validate-run` échoue sur macOS avec une classe awk non terminée | Slash non échappé dans une classe regex awk. | Séparer les clés S3 avec `awk -F/` et comparer les champs chemin; éviter `[^/]` dans une regex awk. |
 | Pod STAR reste `Terminating` en état D/I/O | Processus bloqué en attente d'I/O sur le stockage. | Attendre sa disparition effective avant reprise; inspecter nœud et stockage, ne pas le supprimer de force. |
 | Débit SFS faible avec 100 Go | Limite de débit du volume sur le profil pilote. | Le workdir pilote est passé à 200 Go; mesurer le gain avant dimensionnement production. |
 

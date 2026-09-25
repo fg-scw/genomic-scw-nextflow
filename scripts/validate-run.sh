@@ -47,12 +47,12 @@ mapped_pct="$(awk -F '|' '/Uniquely mapped reads %/ {gsub(/[[:space:]%]/, "", $2
 awk -v pct="${mapped_pct:-0}" 'BEGIN {exit !(pct + 0 >= 5)}' \
   || fail "STAR unique mapping rate is below 5%; expected human GRCh38 reads."
 
-bam_key="$(tr '\t' '\n' <<<"$keys" | awk '/\/star_salmon\/[^/]*SRR1039508[^/]*\.bam$/ {print; exit}')"
+bam_key="$(tr '\t' '\n' <<<"$keys" | awk -F/ '$NF ~ /SRR1039508.*[.]bam$/ && $(NF-1) == "star_salmon" {print; exit}')"
 [[ -n "$bam_key" ]] || fail "No saved STAR BAM found; the validation run must include --save_align_intermeds true."
 bam_size="$(aws_pipeline s3api head-object --bucket "$RESULTS_BUCKET" --key "$bam_key" --query ContentLength --output text)"
 [[ "$bam_size" =~ ^[0-9]+$ ]] && (( bam_size > 0 )) || fail "The STAR BAM is empty."
 
-quant_key="${PREFIX}/star_salmon/salmon/SRR1039508/quant.sf"
+quant_key="${PREFIX}/star_salmon/SRR1039508/quant.sf"
 aws_pipeline s3 cp "s3://${RESULTS_BUCKET}/${quant_key}" "${TMP_DIR}/quant.sf" --only-show-errors \
   || fail "Salmon quantification is missing: s3://${RESULTS_BUCKET}/${quant_key}"
 quant_rows="$(awk 'NR > 1 && $5 > 0 {n++} END {print n+0}' "${TMP_DIR}/quant.sf")"
