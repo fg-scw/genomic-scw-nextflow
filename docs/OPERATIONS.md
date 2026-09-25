@@ -30,6 +30,7 @@ make run-pipeline RUN_ID=<run-id> RESUME=1
 | `validate-run` ne trouve pas `quant.sf` | Le chemin supposé incluait `/salmon/`; nf-core/rnaseq 3.14.0 publie `star_salmon/<sample>/quant.sf`. | Valider les chemins contre les clés S3 réellement publiées par la version du pipeline. |
 | Pod STAR reste `Terminating` en état D/I/O | Processus bloqué en attente d'I/O sur le stockage. | Attendre sa disparition effective avant reprise; inspecter nœud et stockage, ne pas le supprimer de force. |
 | Débit SFS faible avec 100 Go | Limite de débit du volume sur le profil pilote. | Le workdir pilote est passé à 200 Go; mesurer le gain avant dimensionnement production. |
+| `terraform -chdir=terraform/infra plan` échoue en refresh avec `GetBucketCors` HTTP 403 sur input/results | Le principal opérateur actif n'est pas autorisé à lire les métadonnées de ces buckets par leurs politiques restrictives. | Faire approuver et ajouter le principal Terraform/opérateur à chaque politique avec le droit minimal de lecture des métadonnées, dans le projet dédié. Ne pas désactiver le refresh ni élargir les permissions sans revue. |
 
 ## Préserver et détruire
 
