@@ -2,11 +2,11 @@
 # Export SCW_ACCESS_KEY / SCW_SECRET_KEY and AWS_ACCESS_KEY_ID /
 # AWS_SECRET_ACCESS_KEY in your shell before Terraform commands.
 
-scw_project_id = "00000000-0000-0000-0000-000000000000"
+scw_project_id = "1d6906b8-42b0-4141-8752-28b7fcfccb95" # hcl-nextflow (SA-Demo)
 
 cluster_name    = "hcl-public-netflow"
 scaleway_region = "fr-par"
-scaleway_zone   = "fr-par-1"
+scaleway_zone   = "fr-par-3"
 k8s_version     = "1.37.0"
 
 # Demo defaults are intentionally small. For 300-400 samples, size SFS near
@@ -24,4 +24,4 @@ noncurrent_version_retention_days = 365
 # pipeline_api_key_expires_at = "2027-09-25T00:00:00Z"
 # pipeline_secret_revision   = 2
 
-tags = ["env=poc", "project=hcl-public-netflow", "pipeline=nf-core-rnaseq"]
+tags = ["env=poc", "project=hcl-nextflow", "pipeline=nf-core-rnaseq"]

@@ -2,7 +2,9 @@
 
 ## État Terraform
 
-Le backend est un bucket Object Storage créé avant `terraform init` par `make bootstrap-state`, distinct des buckets de données et avec versioning activé. Chaque root Terraform utilise une clé d'état dédiée et `use_lockfile=true`. Garder les fichiers `backend.hcl` hors Git et n'y inscrire aucun secret. Les credentials Scaleway viennent de l'environnement; les identifiants de projet et paramètres non secrets sont dans les fichiers `terraform.tfvars` locaux.
+Le backend est un bucket Object Storage créé avant `terraform init` par `make bootstrap-state`, distinct des buckets de données et avec versioning activé. `STATE_PROJECT_ID` est passé explicitement au CLI Scaleway; la sélection de projet par défaut du profil n'est pas utilisée pour cette création. Chaque root Terraform utilise une clé d'état dédiée et `use_lockfile=true`. Ce mode de verrouillage nécessite les droits Get/Put/Delete sur chaque objet `.tflock`. Garder les fichiers `backend.hcl` hors Git et n'y inscrire aucun secret. Les credentials S3 backend sont chargés depuis Scaleway Secret Manager dans l'environnement courant, suivant la procédure générique du [README](../README.md#préparer-la-configuration); les identifiants de projet et paramètres non secrets sont dans les fichiers `terraform.tfvars` locaux.
+
+Les permission sets S3 de Scaleway, y compris ceux de l'identité backend (`ObjectStorageBucketsRead`, `ObjectStorageObjectsRead`, `ObjectStorageObjectsWrite` et `ObjectStorageObjectsDelete`), s'appliquent au niveau projet. Une bucket policy ne remplace pas cette portée IAM. Ne pas ajouter de données sans rapport à ce projet; pour un déploiement production, isoler le backend dans un projet Scaleway distinct ou établir des protections de ressources explicites pour les autres buckets.
 
 Si un `terraform apply` est interrompu, lire la sortie et l'état avant de recommencer. Initialiser les deux roots avec leur backend, lancer `plan`, puis appliquer seulement le plan revu. Ne pas supprimer manuellement les objets `.tflock` et ne pas lancer `force-unlock` sans confirmer que le processus ayant acquis le verrou est terminé et que l'identifiant correspond.
 

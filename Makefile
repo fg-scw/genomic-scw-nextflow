@@ -5,6 +5,7 @@ SCRIPTS_DIR := scripts
 NAMESPACE ?= bioinformatics
 KUBECONFIG ?= $(HOME)/.kube/config-hcl-public-netflow
 STATE_BUCKET ?=
+STATE_PROJECT_ID ?= 1d6906b8-42b0-4141-8752-28b7fcfccb95
 STATE_REGION ?= fr-par
 RUN_ID ?=
 RESUME ?= 0
@@ -24,12 +25,12 @@ help: ## List available workflows
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z0-9_-]+:.*##/ {printf "\033[36m%-24s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 init: ## Bootstrap the backend bucket then initialize both Terraform roots
-	$(MAKE) bootstrap-state STATE_BUCKET=$(STATE_BUCKET) STATE_REGION=$(STATE_REGION)
+	$(MAKE) bootstrap-state STATE_BUCKET=$(STATE_BUCKET) STATE_PROJECT_ID=$(STATE_PROJECT_ID) STATE_REGION=$(STATE_REGION)
 	$(MAKE) infra-init
 	$(MAKE) platform-init
 
 bootstrap-state: ## Create a private versioned state bucket before Terraform init
-	STATE_BUCKET="$(STATE_BUCKET)" STATE_REGION="$(STATE_REGION)" bash $(SCRIPTS_DIR)/bootstrap-state.sh
+	STATE_BUCKET="$(STATE_BUCKET)" STATE_PROJECT_ID="$(STATE_PROJECT_ID)" STATE_REGION="$(STATE_REGION)" bash $(SCRIPTS_DIR)/bootstrap-state.sh
 
 infra-init: ## Initialize the Scaleway infrastructure Terraform root
 	$(TF) -chdir=$(INFRA_DIR) init -input=false -backend-config=backend.hcl
@@ -60,7 +61,7 @@ sync-secret: ## Copy the pipeline S3 secret from Scaleway Secret Manager into Ku
 	bash $(SCRIPTS_DIR)/sync-k8s-secret.sh
 
 cluster: ## Deploy infrastructure, install kubeconfig, create platform resources and sync the secret
-	$(MAKE) bootstrap-state STATE_BUCKET=$(STATE_BUCKET) STATE_REGION=$(STATE_REGION)
+	$(MAKE) bootstrap-state STATE_BUCKET=$(STATE_BUCKET) STATE_PROJECT_ID=$(STATE_PROJECT_ID) STATE_REGION=$(STATE_REGION)
 	$(MAKE) infra-apply AUTO_APPROVE=$(AUTO_APPROVE)
 	$(MAKE) kubeconfig
 	$(MAKE) platform-apply AUTO_APPROVE=$(AUTO_APPROVE)
@@ -119,7 +120,7 @@ smoke-test: ## Prepare, run and validate the small human genomic validation data
 
 deploy-and-validate: ## Deploy everything, prepare GRCh38, and run an end-to-end human validation
 	@test -n "$(RUN_ID)" || { echo 'Set RUN_ID, e.g. make deploy-and-validate RUN_ID=validation-20260925'; exit 2; }
-	$(MAKE) cluster STATE_BUCKET="$(STATE_BUCKET)" STATE_REGION="$(STATE_REGION)" AUTO_APPROVE=$(AUTO_APPROVE)
+	$(MAKE) cluster STATE_BUCKET="$(STATE_BUCKET)" STATE_PROJECT_ID="$(STATE_PROJECT_ID)" STATE_REGION="$(STATE_REGION)" AUTO_APPROVE=$(AUTO_APPROVE)
 	$(MAKE) smoke-test RUN_ID=$(RUN_ID)
 
 destroy: ## Destroy platform then infrastructure (interactive; back up SFS data first)

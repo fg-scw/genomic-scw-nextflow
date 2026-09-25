@@ -41,13 +41,22 @@ resource "scaleway_object_bucket_policy" "input_read" {
   policy = jsonencode({
     Version = "2023-04-17"
     Id      = "${var.cluster_name}-input-read"
-    Statement = [{
-      Sid       = "PipelineReadInput"
-      Effect    = "Allow"
-      Principal = { SCW = "application_id:${scaleway_iam_application.pipeline.id}" }
-      Action    = ["s3:ListBucket", "s3:GetObject"]
-      Resource  = [scaleway_object_bucket.data["input"].name, "${scaleway_object_bucket.data["input"].name}/*"]
-    }]
+    Statement = [
+      {
+        Sid       = "PipelineReadInput"
+        Effect    = "Allow"
+        Principal = { SCW = "application_id:${scaleway_iam_application.pipeline.id}" }
+        Action    = ["s3:ListBucket", "s3:GetObject"]
+        Resource  = [scaleway_object_bucket.data["input"].name, "${scaleway_object_bucket.data["input"].name}/*"]
+      },
+      {
+        Sid       = "PipelineUploadValidationInputs"
+        Effect    = "Allow"
+        Principal = { SCW = "application_id:${scaleway_iam_application.pipeline.id}" }
+        Action    = ["s3:PutObject"]
+        Resource  = ["${scaleway_object_bucket.data["input"].name}/validation/*"]
+      },
+    ]
   })
 }
 

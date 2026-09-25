@@ -14,6 +14,18 @@ validate_run_id "$RUN_ID"
 RESUME="${2:-}"
 [[ -z "$RESUME" || "$RESUME" == --resume ]] || { usage >&2; exit 2; }
 
+if [[ "$RESUME" == --resume ]]; then
+  require_commands aws terraform jq
+  load_bucket_outputs
+  load_pipeline_s3_credentials
+  for object in samplesheet.csv SRR1039508_1.fastq.gz SRR1039508_2.fastq.gz; do
+    if ! aws_pipeline s3api head-object --bucket "$INPUT_BUCKET" \
+      --key "validation/${RUN_ID}/${object}" >/dev/null 2>&1; then
+      fail "Cannot resume ${RUN_ID}: prepared input object ${object} is missing or inaccessible. Run prepare-demo.sh with this run ID first."
+    fi
+  done
+fi
+
 "${SCRIPT_DIR}/bootstrap-reference.sh"
 if [[ "$RESUME" != --resume ]]; then
   "${SCRIPT_DIR}/prepare-demo.sh" "$RUN_ID"

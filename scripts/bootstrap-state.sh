@@ -2,8 +2,14 @@
 set -euo pipefail
 
 : "${STATE_BUCKET:?Set STATE_BUCKET to the dedicated Terraform state bucket name}"
+: "${STATE_PROJECT_ID:?Set STATE_PROJECT_ID to the Scaleway project UUID for the state bucket}"
 STATE_REGION="${STATE_REGION:-fr-par}"
 S3_ENDPOINT="https://s3.${STATE_REGION}.scw.cloud"
+
+[[ "$STATE_PROJECT_ID" =~ ^[0-9a-fA-F-]{36}$ ]] || {
+  printf 'STATE_PROJECT_ID must be a UUID.\n' >&2
+  exit 2
+}
 
 for command in scw aws; do
   command -v "$command" >/dev/null 2>&1 || {
@@ -12,11 +18,12 @@ for command in scw aws; do
   }
 done
 
-if scw object bucket get "$STATE_BUCKET" region="$STATE_REGION" >/dev/null 2>&1; then
+if scw object bucket get "$STATE_BUCKET" project-id="$STATE_PROJECT_ID" region="$STATE_REGION" >/dev/null 2>&1; then
   printf 'State bucket already exists: %s\n' "$STATE_BUCKET"
 else
-  printf 'Creating private, versioned state bucket: %s\n' "$STATE_BUCKET"
-  scw object bucket create "$STATE_BUCKET" enable-versioning=true acl=private region="$STATE_REGION"
+  printf 'Creating private, versioned state bucket %s in project %s.\n' "$STATE_BUCKET" "$STATE_PROJECT_ID"
+  scw object bucket create "$STATE_BUCKET" enable-versioning=true acl=private \
+    project-id="$STATE_PROJECT_ID" region="$STATE_REGION"
 fi
 
 versioning_status="$(aws --endpoint-url "$S3_ENDPOINT" --region "$STATE_REGION" \

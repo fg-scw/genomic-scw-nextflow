@@ -8,6 +8,7 @@ require_kubernetes_base
 
 secret_id="$(terraform -chdir="$TF_INFRA" output -raw pipeline_credentials_secret_id 2>/dev/null)" \
   || fail "Terraform output pipeline_credentials_secret_id is unavailable."
+secret_id="$(normalize_secret_id "$secret_id")"
 revision="$(terraform -chdir="$TF_INFRA" output -raw pipeline_credentials_revision 2>/dev/null)" \
   || fail "Terraform output pipeline_credentials_revision is unavailable."
 payload="$(scw secret version access "$secret_id" revision="$revision" region="$S3_REGION" raw=true 2>/dev/null)" \

@@ -20,7 +20,7 @@ load_pipeline_s3_credentials
 
 INPUT_PREFIX="validation/${RUN_ID}"
 INPUT_URI="s3://${INPUT_BUCKET}/${INPUT_PREFIX}/samplesheet.csv"
-existing="$(aws_pipeline s3api list-objects-v2 --bucket "$INPUT_BUCKET" --prefix "${INPUT_PREFIX}/" --max-keys 1 --query 'length(Contents)' --output text)"
+existing="$(aws_pipeline s3api list-objects-v2 --bucket "$INPUT_BUCKET" --prefix "${INPUT_PREFIX}/" --max-keys 1 --query 'KeyCount' --output text)"
 [[ "$existing" == "0" || "$existing" == "None" ]] || fail "Input prefix already contains objects; use a new run ID to keep inputs immutable."
 
 TMP_DIR="$(mktemp -d)"
@@ -32,19 +32,80 @@ printf 'Preparing human demo data SRR1039508 (GRCh38-compatible), run %s.\n' "$R
 for mate in 1 2; do
   source_file="SRR1039508_${mate}.fastq.gz"
   subset_file="${TMP_DIR}/${source_file}"
-  printf 'Downloading and checking mate %s...\n' "$mate"
-  curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
-    --output "${TMP_DIR}/source-${source_file}" "${FASTQ_BASE}/${source_file}"
-  gzip -t "${TMP_DIR}/source-${source_file}"
-  # awk consumes the complete stream, so gzip does not receive SIGPIPE when the
-  # fixed-size subset ends before the full public accession.
-  gzip -dc "${TMP_DIR}/source-${source_file}" \
-    | awk -v max_lines="$READ_LINES" 'NR <= max_lines { print }' \
+  curl_log="${TMP_DIR}/curl-mate-${mate}.log"
+  gzip_log="${TMP_DIR}/gzip-mate-${mate}.log"
+  fastq_log="${TMP_DIR}/fastq-mate-${mate}.log"
+  printf 'Streaming mate %s and keeping the first 50,000 FASTQ records...\n' "$mate"
+
+  # The AWK validator stops as soon as it has consumed exactly 50,000 complete
+  # records. That intentionally closes the HTTP/decompression pipes; collect
+  # each status so only curl's resulting write error and gzip's SIGPIPE (or
+  # explicit Broken pipe diagnostic) are allowed after the full subset validates.
+  set +e
+  curl --fail --location --retry 5 --silent --show-error --output - \
+    "${FASTQ_BASE}/${source_file}" 2>"$curl_log" \
+    | gzip -dc 2>"$gzip_log" \
+    | awk -v target_lines="$READ_LINES" '
+        NR % 4 == 1 && substr($0, 1, 1) != "@" {
+          printf "Invalid FASTQ header at line %d.\n", NR > "/dev/stderr"
+          exit 1
+        }
+        NR % 4 == 2 {
+          sequence_length = length($0)
+          if (sequence_length == 0) {
+            printf "Empty FASTQ sequence at line %d.\n", NR > "/dev/stderr"
+            exit 1
+          }
+        }
+        NR % 4 == 3 && substr($0, 1, 1) != "+" {
+          printf "Invalid FASTQ separator at line %d.\n", NR > "/dev/stderr"
+          exit 1
+        }
+        NR % 4 == 0 && length($0) != sequence_length {
+          printf "Sequence/quality length mismatch at record %d.\n", NR / 4 > "/dev/stderr"
+          exit 1
+        }
+        {
+          print
+          if (NR == target_lines) exit
+        }
+        END {
+          if (NR != target_lines) {
+            printf "Expected %d FASTQ lines; received %d.\n", target_lines, NR > "/dev/stderr"
+            exit 1
+          }
+        }
+      ' 2>"$fastq_log" \
     | gzip -n > "$subset_file"
+  pipeline_status=("${PIPESTATUS[@]}")
+  set -e
+  curl_status="${pipeline_status[0]}"
+  source_gzip_status="${pipeline_status[1]}"
+  fastq_status="${pipeline_status[2]}"
+  output_gzip_status="${pipeline_status[3]}"
+
+  if (( fastq_status != 0 || output_gzip_status != 0 )); then
+    cat "$fastq_log" "$gzip_log" "$curl_log" >&2
+    fail "Could not create a valid 50,000-record FASTQ subset for mate ${mate}."
+  fi
+  if (( curl_status != 0 && curl_status != 23 )); then
+    cat "$curl_log" >&2
+    fail "FASTQ source transfer failed for mate ${mate} (curl exit ${curl_status})."
+  fi
+  if (( source_gzip_status != 0 && source_gzip_status != 141 )); then
+    gzip_diagnostic="$(cat "$gzip_log")"
+    case "$gzip_diagnostic" in
+      *"Broken pipe"*|*"broken pipe"*) ;;
+      *)
+        cat "$gzip_log" >&2
+        fail "FASTQ source decompression failed for mate ${mate} (gzip exit ${source_gzip_status})."
+        ;;
+    esac
+  fi
+
   lines="$(gzip -dc "$subset_file" | wc -l | tr -d '[:space:]')"
   [[ "$lines" -eq "$READ_LINES" ]] || fail "Expected 50,000 complete FASTQ records in mate ${mate}; got $((lines / 4))."
   gzip -t "$subset_file"
-  rm -f "${TMP_DIR}/source-${source_file}"
 done
 
 sample_sheet="${TMP_DIR}/samplesheet.csv"

@@ -31,6 +31,13 @@ validate_run_id() {
   [[ "$1" =~ ^[a-z0-9][a-z0-9-]{0,39}$ ]] || fail "Run ID must be 1-40 lowercase letters, digits or hyphens, starting with a letter or digit."
 }
 
+normalize_secret_id() {
+  local secret_id="${1##*/}"
+  [[ "$secret_id" =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]] \
+    || fail "Terraform pipeline_credentials_secret_id must be a UUID or region/UUID."
+  printf '%s' "$secret_id"
+}
+
 load_bucket_outputs() {
   [[ -d "$TF_INFRA" ]] || fail "Terraform infra directory is missing: ${TF_INFRA}"
   INPUT_BUCKET="$(terraform -chdir="$TF_INFRA" output -raw input_bucket_name 2>/dev/null)" || fail "Terraform output input_bucket_name is unavailable; apply infra first."
@@ -54,6 +61,7 @@ load_pipeline_s3_credentials() {
   local secret_id revision payload
   secret_id="$(terraform -chdir="$TF_INFRA" output -raw pipeline_credentials_secret_id 2>/dev/null)" \
     || fail "Terraform output pipeline_credentials_secret_id is unavailable."
+  secret_id="$(normalize_secret_id "$secret_id")"
   revision="$(terraform -chdir="$TF_INFRA" output -raw pipeline_credentials_revision 2>/dev/null)" \
     || fail "Terraform output pipeline_credentials_revision is unavailable."
   payload="$(scw secret version access "$secret_id" revision="$revision" region="$S3_REGION" raw=true 2>/dev/null)" \

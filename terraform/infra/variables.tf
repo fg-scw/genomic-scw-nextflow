@@ -23,7 +23,7 @@ variable "scaleway_region" {
 variable "scaleway_zone" {
   description = "Availability zone for Kapsule node pools."
   type        = string
-  default     = "fr-par-1"
+  default     = "fr-par-3"
 }
 
 variable "k8s_version" {

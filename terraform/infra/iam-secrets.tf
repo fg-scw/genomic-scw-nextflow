@@ -1,6 +1,6 @@
 resource "scaleway_iam_application" "pipeline" {
   name        = "${var.cluster_name}-pipeline"
-  description = "nf-core/rnaseq S3 identity; Object Storage IAM permissions are project-scoped"
+  description = "nf-core/rnaseq S3 identity; object permissions are scoped to the dedicated project"
   tags        = var.tags
 }
 
@@ -11,19 +11,23 @@ resource "scaleway_iam_api_key" "pipeline" {
   expires_at         = var.pipeline_api_key_expires_at
 }
 
-# This intentionally grants bucket metadata access only. Scaleway's S3
-# authorization requires compatible project-level IAM permissions in addition
-# to bucket policies. Do not expand this policy in a shared project without
-# reviewing the project-wide impact; validate application S3 actions live.
+# Scaleway grants Object Storage IAM permission sets at project scope. The
+# bucket policies below further constrain this application to reading the
+# input bucket and reading/writing the results bucket. Keep this project
+# dedicated to this deployment: the IAM permission sets themselves are not
+# scoped to individual buckets.
 resource "scaleway_iam_policy" "pipeline_object_storage" {
   name           = "${var.cluster_name}-pipeline-object-storage"
-  description    = "Object Storage bucket metadata access for pipeline"
+  description    = "Object Storage object read/write permissions for Nextflow in the dedicated project"
   application_id = scaleway_iam_application.pipeline.id
   tags           = var.tags
 
   rule {
-    project_ids          = [var.scw_project_id]
-    permission_set_names = ["ObjectStorageBucketsRead"]
+    project_ids = [var.scw_project_id]
+    permission_set_names = [
+      "ObjectStorageObjectsRead",
+      "ObjectStorageObjectsWrite",
+    ]
   }
 }
 

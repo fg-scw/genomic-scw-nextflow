@@ -3,10 +3,10 @@
 bucket                      = "REPLACE_WITH_PRECREATED_STATE_BUCKET"
 key                         = "hcl-public-netflow/kubernetes.tfstate"
 region                      = "fr-par"
-endpoint                    = "https://s3.fr-par.scw.cloud"
+endpoints                   = { s3 = "https://s3.fr-par.scw.cloud" }
 skip_credentials_validation = true
 skip_region_validation      = true
 skip_requesting_account_id  = true
-force_path_style            = true
+use_path_style              = true
 encrypt                     = true
 use_lockfile                = true

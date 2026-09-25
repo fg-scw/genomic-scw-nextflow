@@ -102,13 +102,19 @@ spec:
               test -s genome.fa && test -s genes.gtf
               chmod 0644 genome.fa genes.gtf
               sha256sum genome.fa genes.gtf > SHA256SUMS
+              fasta_sha256="$(awk '$2 == "genome.fa" {print $1; found=1; exit} END {if (!found) exit 1}' SHA256SUMS)"
+              gtf_sha256="$(awk '$2 == "genes.gtf" {print $1; found=1; exit} END {if (!found) exit 1}' SHA256SUMS)"
+              for digest in "$fasta_sha256" "$gtf_sha256"; do
+                [ "${#digest}" -eq 64 ] || { echo "Invalid SHA-256 entry in SHA256SUMS" >&2; exit 1; }
+                case "$digest" in *[!0-9a-f]*) echo "Invalid SHA-256 entry in SHA256SUMS" >&2; exit 1 ;; esac
+              done
               cat > reference.manifest <<EOF_MANIFEST
               assembly=GRCh38
               ensembl_release=110
               fasta_source=${fasta_base}/${fasta_name}
               gtf_source=${gtf_base}/${gtf_name}
-              fasta_sha256=$(sha256sum genome.fa | awk '{print $1}')
-              gtf_sha256=$(sha256sum genes.gtf | awk '{print $1}')
+              fasta_sha256=${fasta_sha256}
+              gtf_sha256=${gtf_sha256}
               EOF_MANIFEST
               chmod 0644 SHA256SUMS reference.manifest
               cd "$root"
