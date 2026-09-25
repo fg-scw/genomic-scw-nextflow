@@ -1,6 +1,6 @@
 # nf-core/rnaseq sur Scaleway Kapsule
 
-POC Terraform pour Kapsule **1.37.0**, Nextflow **25.10.4** et `nf-core/rnaseq` **3.14.0**. Le projet Scaleway dédié est `hcl-nextflow` (`1d6906b8-42b0-4141-8752-28b7fcfccb95`, organisation SA-Demo), région `fr-par`, zone `fr-par-3`.
+POC Terraform pour Kapsule **1.37.0**, Nextflow **25.10.4** et `nf-core/rnaseq` **3.14.0**. Le projet Scaleway précréé `hcl-nextflow` (`1d6906b8-42b0-4141-8752-28b7fcfccb95`, organisation SA-Demo) est en région `fr-par`, zone `fr-par-3`; Terraform y déploie les ressources.
 
 Le pipeline utilise `nf-k8s` 1.2.2, `nf-amazon` 3.4.1 et GRCh38 Ensembl 110. Les entrées et résultats vont dans Object Storage; le workdir Nextflow et la référence partagée sont sur SFS RWX.
 
@@ -50,12 +50,13 @@ cp terraform/kubernetes/terraform.tfvars.example terraform/kubernetes/terraform.
 
 Le bucket Terraform doit être privé et versionné. Il est distinct des buckets input/résultats. La cible `make bootstrap-state` le crée (ou vérifie son versioning); elle passe le `STATE_PROJECT_ID` explicitement au CLI Scaleway.
 
-Charger dans le shell courant la clé backend depuis Secret Manager. Renseigner les trois premières variables avec les identifiants non secrets fournis pour l'environnement. Les valeurs du secret ne s'affichent pas et ne s'écrivent pas dans le dépôt :
+Définir le profil Scaleway et les coordonnées non secrètes de la clé backend, puis la charger dans le shell courant. Remplacer les valeurs d'exemple par celles de l'environnement. La valeur du secret ne s'affiche pas et ne s'écrit pas dans le dépôt :
 
 ```bash
-: "${STATE_SECRET_ID:?Set the Secret Manager ID}"
-: "${STATE_SECRET_REVISION:?Set the secret revision}"
-: "${STATE_REGION:?Set the secret region}"
+export SCW_PROFILE="your-scaleway-profile"
+export STATE_SECRET_ID="your-secret-id"
+export STATE_SECRET_REVISION="your-secret-revision"
+export STATE_REGION="fr-par"
 set +x
 state_credentials="$(scw secret version access "$STATE_SECRET_ID" revision="$STATE_SECRET_REVISION" region="$STATE_REGION" raw=true)"
 export AWS_ACCESS_KEY_ID="$(jq -er '.access_key' <<<"$state_credentials")"
