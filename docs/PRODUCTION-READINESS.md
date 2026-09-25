@@ -6,6 +6,23 @@ Le dépôt déploie ses ressources dans le projet Scaleway précréé `hcl-nextf
 
 Les valeurs par défaut sont destinées à un pilote : pools orchestrateur POP2-4C-16G et calcul POP2-HM-8C-64G, jusqu'à deux nœuds chacun; PVC SFS 200 Go workdir et 50 Go référence. Le workdir a été augmenté de 100 à 200 Go après un débit observé proche du débit nominal SFS du volume de 100 Go; le gain de performance reste à mesurer sur un nouveau run. Le jeu d'essai est limité à 50 000 paires. Les volumes visés de 300–400 échantillons / 2,2 To ne sont pas qualifiés.
 
+## Mesures du pilote — 25 septembre 2026 (UTC)
+
+Mesures faites depuis le pod head Nextflow sur `star-compute`, pendant une écriture STAR sur SFS. Les tests S3 utilisaient `curl` signé et un bucket privé temporaire du même projet.
+
+| Cible / opération | Résultat observé |
+|---|---|
+| S3, PUT 64 MiB | Premier essai : 5,663 s (~11,9 MB/s); essais suivants : 1,434 et 1,410 s (~46,8–47,6 MB/s). |
+| S3, GET 64 MiB | 0,565 / 0,759 / 0,423 s (~88–159 MB/s). |
+| S3, HEAD | p50 81,9 ms; plage 72,6–122,7 ms. |
+| S3, PUT 4 KiB | p50 396 ms; plage 176–610 ms. |
+| S3, GET FASTQ réel (2 628 433 octets) | 0,179 / 0,103 / 0,095 s. |
+| SFS virtiofs, PVC 200 Go | Écriture 64 MiB + `fsync`: 8,035 s (8,0 MiB/s); lecture après `POSIX_FADV_DONTNEED`: 8,977 s (7,1 MiB/s). `fsync` 4 KiB × 20 : p50 23,22 ms, p95 23,91 ms. |
+| STAR, fichier `SA` | Croissance de 18,9 à 20,8 Go en 87 s, environ 22 MB/s. |
+| `/tmp` overlay du conteneur | Baseline 64 MiB : écriture 0,092 s, lecture 0,066 s; `fsync` 4 KiB : p50 1,70 ms. |
+
+Ces mesures forment une seule série sur un seul échantillon, avec STAR en charge. `curl` ne passe pas par le plugin S3 Nextflow; `POSIX_FADV_DONTNEED` ne garantit pas l'absence de cache. `/tmp` est l'overlay du conteneur, pas un benchmark Block Storage. Les disques système Block Storage sbs_5k et le scratch NVMe GEN3 n'ont pas été benchmarkés directement. Le bucket temporaire et les fichiers de test ont été supprimés.
+
 ## Avant données de production
 
 - **Capacité** : mesurer RAM/CPU STAR, débit et capacité SFS, autoscaling, durée et coût avec les plus gros échantillons représentatifs. Ajuster pools et PVC après mesure.
