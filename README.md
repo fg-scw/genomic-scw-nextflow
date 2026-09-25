@@ -20,7 +20,8 @@ flowchart LR
     end
     WORK[("SFS RWX<br/>workdir · 200 Go")]
     REFVOL[("SFS RWX<br/>référence · 50 Go")]
-    INPUT[("Object Storage<br/>FASTQ d'entrée")]
+    SHEET[("Object Storage<br/>samplesheet")]
+    FASTQ[("Object Storage<br/>FASTQ")]
     RESULTS[("Object Storage<br/>résultats")]
     BLOCK["Block Storage sbs_5k<br/>disques système des nœuds<br/>pas le workdir/référence"]
     NVME["GEN3 MEMORY NVMe<br/>option scratch · non déployée"]
@@ -29,10 +30,12 @@ flowchart LR
   REF -->|"écrit la référence"| REFVOL
   REFVOL -->|"lecture seule"| TASKS
   HEAD -->|"orchestration"| TASKS
-  HEAD <-->|"workdir / reprise"| WORK
-  TASKS <-->|"workdir / reprise"| WORK
-  INPUT -->|"lecture"| TASKS
-  TASKS -->|"écriture"| RESULTS
+  SHEET -->|"lecture au lancement"| HEAD
+  FASTQ -->|"source des reads"| HEAD
+  HEAD <-->|"staging FASTQ / reprise"| WORK
+  WORK -->|"FASTQ stagés"| TASKS
+  TASKS -->|"sorties de tâches"| WORK
+  HEAD -->|"publishDir depuis le workdir SFS"| RESULTS
   O -->|"disques système"| BLOCK
   C -->|"disques système"| BLOCK
   TASKS -.->|"benchmark futur; montage explicite requis"| NVME
