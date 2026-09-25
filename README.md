@@ -121,7 +121,7 @@ make smoke-test RUN_ID=validation-20260925 RESUME=1
 
 ## POC et production
 
-Le POC vérifie un petit run humain avec un PVC workdir SFS de 200 Go et une référence de 50 Go. La capacité workdir a été augmentée pour tester un possible goulot SFS; le gain de débit reste à mesurer. La validation e2e du projet doit être confirmée par l'exécution effective et les contrôles ci-dessus. Les pools et PVC par défaut sont dimensionnés pour le pilote; les volumes de 300–400 échantillons ou 2,2 To, la reprise après panne, les coûts et la restauration ne sont pas qualifiés.
+Le run humain a validé le parcours e2e sur un PVC workdir SFS de 200 Go et une référence de 50 Go : le Job s'est terminé et `make validate-run` a vérifié les artefacts. Le chargement STAR a observé environ 22 MB/s sur SFS; aucune comparaison contrôlée entre les PVC de 100 et 200 Go ne permet d'attribuer un gain à l'agrandissement. Cette validation confirme le fonctionnement technique, pas la validité biologique. Les pools et PVC restent dimensionnés pour le pilote; les volumes de 300–400 échantillons ou 2,2 To, la reprise après panne, les coûts et la restauration ne sont pas qualifiés.
 
 Avant toute production, faire un benchmark représentatif STAR, dimensionner SFS/autoscaling, tester reprise et restauration, définir rétention/observabilité, et faire valider les métriques QC. Les permissions IAM objet sont à l'échelle du projet : séparer aussi le backend Terraform dans un projet isolé ou protéger explicitement les autres buckets.
 
@@ -129,7 +129,7 @@ Les instances GEN3 MEMORY offrent une option de benchmark scratch NVMe local; el
 
 ## Observations du pilote — 25 septembre 2026 (UTC)
 
-| Timestamp UTC | Étape | Résultat observé | Pool |
+| Timestamp UTC | Étape | Résultat observé | Pool / lieu |
 |---|---|---|---|
 | 13:47:37–14:46:37 | Bootstrap de la référence | Job GRCh38 Ensembl 110 terminé. | orchestrator |
 | 15:00:27 | Premier Job Nextflow | Démarrage du run; une tâche STAR de tri apparaît à 15:36:59. | star-compute |
@@ -137,6 +137,11 @@ Les instances GEN3 MEMORY offrent une option de benchmark scratch NVMe local; el
 | 16:19:06–16:19:56 | Reprise | Job/head puis pod STAR recréés; caches Nextflow réutilisés. | star-compute |
 | 16:27:49 | Index STAR | Nouvelle étape de génération d'index observée. | star-compute |
 | 16:43:46 | Étape STAR de tri | Étape observée après la reprise. | star-compute |
-| ≈17:05 | Écriture `SA_*` | Écriture observée; Job encore `Running` lors de la capture de 17:41. | star-compute |
-
-La validation e2e reste à confirmer : aucun succès final n'est enregistré dans cette chronologie.
+| ≈17:05 | Écriture `SA_*` | Écriture de blocs temporaires observée; Job encore `Running` lors de la capture de 17:41. | star-compute |
+| 18:28:01 | Suffix array STAR | Génération et empaquetage terminés. | star-compute |
+| 18:59:52 | Génération de l'index STAR | Étape terminée avec succès. | star-compute |
+| 18:59:56–19:22:29 | Lecture de l'index STAR | 29,8 GB chargés depuis SFS en 22 min 33 s. | star-compute |
+| ≈19:26 | Alignement STAR | 49 539 reads après trimming; 94,06 % mappés de façon unique; BAM de 7,6 MB. | star-compute |
+| 19:28:59 | Pool de calcul | Le second nœud `star-compute` est `Ready`. | star-compute |
+| 19:38:41 | Job Nextflow | Job terminé (`Complete`). | star-compute |
+| ≈19:43 | `make validate-run` | Validation passée : BAM de 7 864 439 octets, 10 052 transcrits quantifiés, 13 gènes avec des comptes non nuls et rapport MultiQC présent. | — (commande locale) |
