@@ -23,7 +23,7 @@ make run-pipeline RUN_ID=<run-id> RESUME=1
 | Pods Nextflow `Pending` lors du montage SFS | Chaque head/tâche peut demander les PVC workdir et référence; limite CSI par nœud. | Placer les pods à deux PVC sur `star-compute` et limiter la concurrence selon sa capacité. |
 | Nextflow reçoit `forbidden` sur `pods/status` | RBAC incomplet sur cette sous-ressource. | Accorder `get` sur `pods/status` au ServiceAccount `nextflow`. |
 | Plugin absent ou configuration refusée | Le plugin doit être déclaré avec sa version. | Utiliser `id 'name@version'` dans `nextflow.config`. |
-| Conflit de nom ou rapports remplacés pendant `-resume` | Nom de run imposé ou mêmes chemins trace/report/timeline réutilisés. | Garder le même `RUN_ID` et workdir sans forcer `-name`; archiver les rapports ou leur donner un chemin unique par tentative. |
+| Conflit de nom ou rapports obsolètes pendant `-resume` | `-name` imposé ou Nextflow refuse d'écraser les fichiers trace/report/timeline existants. | Garder le même `RUN_ID`/workdir sans `-name`; activer `report.overwrite = true`, `timeline.overwrite = true` et `trace.overwrite = true`. |
 | Autoscaler évince le head Nextflow | Pod head considéré comme évictable. | Annoter le head `cluster-autoscaler.kubernetes.io/safe-to-evict: "false"`. |
 | Pod STAR reste `Terminating` en état D/I/O | Processus bloqué en attente d'I/O sur le stockage. | Attendre sa disparition effective avant reprise; inspecter nœud et stockage, ne pas le supprimer de force. |
 | Débit SFS faible avec 100 Go | Limite de débit du volume sur le profil pilote. | Le workdir pilote est passé à 200 Go; mesurer le gain avant dimensionnement production. |
