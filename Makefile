@@ -131,11 +131,10 @@ validate-run: ## Validate pipeline outputs for RUN_ID
 
 smoke-test: ## Prepare, run and validate the small human genomic validation dataset
 	@test -n "$(RUN_ID)" || { echo 'Set RUN_ID, e.g. make smoke-test RUN_ID=validation-20260925'; exit 2; }
-	@if [ "$(RESUME)" = 1 ]; then \
-		bash $(SCRIPTS_DIR)/smoke-test.sh "$(RUN_ID)" --resume; \
-	else \
-		bash $(SCRIPTS_DIR)/smoke-test.sh "$(RUN_ID)"; \
-	fi
+	$(MAKE) bootstrap-reference
+	@if [ "$(RESUME)" != 1 ]; then $(MAKE) prepare-demo RUN_ID="$(RUN_ID)"; fi
+	$(MAKE) run-pipeline RUN_ID="$(RUN_ID)" RESUME="$(RESUME)"
+	$(MAKE) validate-run RUN_ID="$(RUN_ID)"
 
 deploy-and-validate: ## Deploy everything, prepare GRCh38, and run an end-to-end human validation
 	@test -n "$(RUN_ID)" || { echo 'Set RUN_ID, e.g. make deploy-and-validate RUN_ID=validation-20260925'; exit 2; }

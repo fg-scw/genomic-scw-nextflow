@@ -65,6 +65,24 @@ OUTPUT_URI="${OUTPUT_URI:-$(s3_output_uri "$RUN_ID")}"
 [[ "$INPUT_URI" == s3://* ]] || fail "Input must be an S3 URI."
 [[ "$OUTPUT_URI" == s3://* ]] || fail "Output must be an S3 URI."
 
+if (( RESUME )); then
+  load_pipeline_s3_credentials
+  if [[ "$INPUT_URI" == "$(s3_input_uri "$RUN_ID")" ]]; then
+    for object in samplesheet.csv SRR1039508_1.fastq.gz SRR1039508_2.fastq.gz; do
+      aws_pipeline s3api head-object --bucket "$INPUT_BUCKET" \
+        --key "validation/${RUN_ID}/${object}" >/dev/null 2>&1 \
+        || fail "Cannot resume ${RUN_ID}: prepared input object ${object} is missing or inaccessible. Run make prepare-demo RUN_ID=${RUN_ID} first."
+    done
+  elif [[ "$INPUT_URI" =~ ^s3://([^/]+)/(.+)$ ]]; then
+    input_bucket="${BASH_REMATCH[1]}"
+    input_key="${BASH_REMATCH[2]}"
+    aws_pipeline s3api head-object --bucket "$input_bucket" --key "$input_key" >/dev/null 2>&1 \
+      || fail "Cannot resume ${RUN_ID}: input samplesheet is missing or inaccessible: ${INPUT_URI}."
+  else
+    fail "Resume input must be an S3 object URI with a bucket and key: ${INPUT_URI}."
+  fi
+fi
+
 JOB_TIMEOUT_SECONDS="${NEXTFLOW_JOB_TIMEOUT_SECONDS:-86400}"
 [[ "$JOB_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail "NEXTFLOW_JOB_TIMEOUT_SECONDS must be a positive integer."
 JOB="nextflow-${RUN_ID}"
