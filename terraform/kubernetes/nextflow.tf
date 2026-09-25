@@ -30,6 +30,12 @@ resource "kubernetes_role" "nextflow_pod_manager" {
 
   rule {
     api_groups = [""]
+    resources  = ["pods/status"]
+    verbs      = ["get"]
+  }
+
+  rule {
+    api_groups = [""]
     resources  = ["pods/log"]
     verbs      = ["get"]
   }

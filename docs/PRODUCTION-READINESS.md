@@ -29,6 +29,12 @@ Ne considérer le service comme prêt pour la production qu'après les contrôle
 - Les données intermédiaires sur SFS et les résultats S3 ont des cycles de vie distincts. La destruction du cluster et des PVC peut supprimer les données de travail; elle ne doit pas servir de politique de purge des résultats.
 - Les valeurs par défaut de pools et de PVC sont destinées à un pilote. Ajuster taille, concurrence et quotas après benchmark et revue de coût.
 
+## Option de benchmark : scratch NVMe local
+
+Les instances Scaleway GEN3 MEMORY exposent un NVMe local éphémère qui peut être évalué pour les tâches STAR ou autres tâches sensibles aux I/O. Ce dépôt ne l'active pas dans le pilote : `scratch=true` seul ne sélectionne pas le NVMe et ne monte aucun volume. Il faut configurer explicitement un volume et son chemin de montage dans les pods de tâches, puis s'assurer que ces pods sont planifiés sur les nœuds GEN3 MEMORY qui fournissent ce stockage.
+
+Ce scratch est local au nœud, non partagé et non persistant : son contenu peut disparaître avec le pod ou le nœud et ne doit pas contenir les entrées, références ou sorties à conserver. Garder le workdir reprenable et les références partagées sur SFS, et les entrées/résultats durables sur S3. Comparer les performances STAR, la concurrence, le coût et le comportement en cas de rescheduling à un run équivalent utilisant le stockage du pilote avant toute adoption.
+
 ## Critère de passage
 
 La revue de production doit contenir les journaux du run représentatif, les métriques de ressources et de coûts, les checksums des références et des sorties, le rapport QC approuvé, ainsi que le compte rendu d'un test de reprise et d'une restauration. Sans ces éléments, qualifier le déploiement de pilote validé, pas de plateforme prête pour la production.

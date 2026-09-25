@@ -98,7 +98,6 @@ nf_args=(
   -params-file /config/params.yaml
   --input "$INPUT_URI"
   --outdir "$OUTPUT_URI"
-  -name "run-${RUN_ID}"
   -with-report "/data/workdir/report-${RUN_ID}.html"
   -with-timeline "/data/workdir/timeline-${RUN_ID}.html"
   -with-trace "/data/workdir/trace-${RUN_ID}.txt"
@@ -116,7 +115,7 @@ kubectl create job "$JOB" -n "$NS" --image="$NEXTFLOW_IMAGE" --dry-run=client -o
       .spec.activeDeadlineSeconds = $timeout |
       .spec.template.spec.serviceAccountName = "nextflow" |
       .spec.template.spec.automountServiceAccountToken = true |
-      .spec.template.spec.nodeSelector = {"k8s.scaleway.com/pool-name": "orchestrator"} |
+      .spec.template.spec.nodeSelector = {"k8s.scaleway.com/pool-name": "star-compute"} |
       .spec.template.spec.containers[0].command = ["nextflow"] |
       .spec.template.spec.containers[0].args = $args |
       .spec.template.spec.containers[0].workingDir = "/data/workdir" |
@@ -143,7 +142,7 @@ kubectl create job "$JOB" -n "$NS" --image="$NEXTFLOW_IMAGE" --dry-run=client -o
         {name: "config", configMap: {name: $configmap}}
       ] |
       .spec.template.spec.tolerations = [
-        {key: "workload", value: "orchestrator", operator: "Equal", effect: "NoSchedule"}
+        {key: "workload", value: "star-compute", operator: "Equal", effect: "NoSchedule"}
       ]' \
   | kubectl apply -f - >/dev/null
 
