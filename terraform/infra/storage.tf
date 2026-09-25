@@ -56,6 +56,21 @@ resource "scaleway_object_bucket_policy" "input_read" {
         Action    = ["s3:PutObject"]
         Resource  = ["${scaleway_object_bucket.data["input"].name}/validation/*"]
       },
+      {
+        Sid       = "TerraformOperatorBucketMetadataRead"
+        Effect    = "Allow"
+        Principal = { SCW = "user_id:${var.operator_user_id}" }
+        Action = [
+          "s3:GetBucketAcl",
+          "s3:GetBucketObjectLockConfiguration",
+          "s3:ListBucket",
+          "s3:GetBucketTagging",
+          "s3:GetBucketCORS",
+          "s3:GetBucketVersioning",
+          "s3:GetLifecycleConfiguration",
+        ]
+        Resource = [scaleway_object_bucket.data["input"].name]
+      },
     ]
   })
 }
@@ -67,18 +82,35 @@ resource "scaleway_object_bucket_policy" "results_rw" {
   policy = jsonencode({
     Version = "2023-04-17"
     Id      = "${var.cluster_name}-results-rw"
-    Statement = [{
-      Sid       = "PipelineReadWriteResults"
-      Effect    = "Allow"
-      Principal = { SCW = "application_id:${scaleway_iam_application.pipeline.id}" }
-      Action = [
-        "s3:ListBucket",
-        "s3:ListBucketMultipartUploads",
-        "s3:ListMultipartUploadParts",
-        "s3:GetObject",
-        "s3:PutObject",
-      ]
-      Resource = [scaleway_object_bucket.data["results"].name, "${scaleway_object_bucket.data["results"].name}/*"]
-    }]
+    Statement = [
+      {
+        Sid       = "PipelineReadWriteResults"
+        Effect    = "Allow"
+        Principal = { SCW = "application_id:${scaleway_iam_application.pipeline.id}" }
+        Action = [
+          "s3:ListBucket",
+          "s3:ListBucketMultipartUploads",
+          "s3:ListMultipartUploadParts",
+          "s3:GetObject",
+          "s3:PutObject",
+        ]
+        Resource = [scaleway_object_bucket.data["results"].name, "${scaleway_object_bucket.data["results"].name}/*"]
+      },
+      {
+        Sid       = "TerraformOperatorBucketMetadataRead"
+        Effect    = "Allow"
+        Principal = { SCW = "user_id:${var.operator_user_id}" }
+        Action = [
+          "s3:GetBucketAcl",
+          "s3:GetBucketObjectLockConfiguration",
+          "s3:ListBucket",
+          "s3:GetBucketTagging",
+          "s3:GetBucketCORS",
+          "s3:GetBucketVersioning",
+          "s3:GetLifecycleConfiguration",
+        ]
+        Resource = [scaleway_object_bucket.data["results"].name]
+      },
+    ]
   })
 }

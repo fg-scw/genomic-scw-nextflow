@@ -3,6 +3,16 @@ variable "scw_project_id" {
   type        = string
 }
 
+variable "operator_user_id" {
+  description = "Scaleway user UUID allowed to read metadata from the input and results buckets."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", var.operator_user_id))
+    error_message = "operator_user_id must be a Scaleway user UUID."
+  }
+}
+
 variable "cluster_name" {
   description = "Resource name prefix; also used to derive globally unique bucket names."
   type        = string

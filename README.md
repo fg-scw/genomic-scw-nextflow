@@ -70,6 +70,8 @@ cp terraform/infra/terraform.tfvars.example terraform/infra/terraform.tfvars
 cp terraform/kubernetes/terraform.tfvars.example terraform/kubernetes/terraform.tfvars
 ```
 
+Dans `terraform/infra/terraform.tfvars`, renseigner `operator_user_id` avec l'UUID de l'utilisateur Scaleway autorisé à lire les métadonnées des deux buckets.
+
 Le bucket Terraform doit être privé et versionné. Il est distinct des buckets input/résultats. La cible `make bootstrap-state` le crée (ou vérifie son versioning); elle passe le `STATE_PROJECT_ID` explicitement au CLI Scaleway.
 
 Définir le profil Scaleway et les coordonnées non secrètes de la clé backend, puis la charger dans le shell courant. Remplacer les valeurs d'exemple par celles de l'environnement. La valeur du secret ne s'affiche pas et ne s'écrit pas dans le dépôt :
