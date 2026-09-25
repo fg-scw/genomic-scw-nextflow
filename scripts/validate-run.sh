@@ -42,8 +42,8 @@ star_log_key="$(tr '\t' '\n' <<<"$keys" | awk '/\/star_salmon\/log\/SRR1039508.*
 aws_pipeline s3 cp "s3://${RESULTS_BUCKET}/${star_log_key}" "${TMP_DIR}/Log.final.out" --only-show-errors
 input_reads="$(awk -F '|' '/Number of input reads/ {gsub(/[[:space:]]/, "", $2); print $2; exit}' "${TMP_DIR}/Log.final.out")"
 mapped_pct="$(awk -F '|' '/Uniquely mapped reads %/ {gsub(/[[:space:]%]/, "", $2); print $2; exit}' "${TMP_DIR}/Log.final.out")"
-[[ "${input_reads:-0}" =~ ^[0-9]+$ ]] && (( input_reads >= 50000 )) \
-  || fail "STAR did not report at least 50,000 input read pairs."
+[[ "${input_reads:-0}" =~ ^[0-9]+$ ]] && (( input_reads >= 45000 )) \
+  || fail "STAR reported fewer than 45,000 input reads after trimming; expected at least 90% retention from the 50,000-pair demo subset."
 awk -v pct="${mapped_pct:-0}" 'BEGIN {exit !(pct + 0 >= 5)}' \
   || fail "STAR unique mapping rate is below 5%; expected human GRCh38 reads."
 
@@ -65,5 +65,5 @@ count_rows="$(awk 'NR > 2 && $NF ~ /^[0-9]+$/ && $NF > 0 {n++} END {print n+0}' 
 (( count_rows > 0 )) || fail "featureCounts output has no non-zero gene counts."
 
 printf 'Validated run %s at %s\n' "$RUN_ID" "$OUTDIR"
-printf '  Nextflow Job: complete\n  Sample: SRR1039508 (50,000 read pairs)\n  STAR uniquely mapped: %s%%\n  Non-empty BAM: %s bytes\n  Quantified transcripts: %s\n  Non-zero gene counts: %s\n  MultiQC report: s3://%s/%s\n' \
-  "$mapped_pct" "$bam_size" "$quant_rows" "$count_rows" "$RESULTS_BUCKET" "$multiqc_key"
+printf '  Nextflow Job: complete\n  Sample: SRR1039508 (50,000 raw read pairs)\n  STAR input reads after trimming: %s\n  STAR uniquely mapped: %s%%\n  Non-empty BAM: %s bytes\n  Quantified transcripts: %s\n  Non-zero gene counts: %s\n  MultiQC report: s3://%s/%s\n' \
+  "$input_reads" "$mapped_pct" "$bam_size" "$quant_rows" "$count_rows" "$RESULTS_BUCKET" "$multiqc_key"
