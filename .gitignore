@@ -1,0 +1,36 @@
+# Credentials and local Terraform configuration
+*.tfvars
+!*.tfvars.example
+backend.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+
+# Terraform provider cache; keep .terraform.lock.hcl versioned
+.terraform/
+**/.terraform/*
+
+# Local Kubernetes credentials
+*.kubeconfig
+kubeconfig
+
+# Nextflow work and run output
+work/
+.nextflow/
+.nextflow.log*
+reports/
+results/
+reference-data/
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+
+# Editor and OS files
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~

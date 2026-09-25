@@ -1,0 +1,27 @@
+# Copy to terraform.tfvars. Keep API credentials out of this file.
+# Export SCW_ACCESS_KEY / SCW_SECRET_KEY and AWS_ACCESS_KEY_ID /
+# AWS_SECRET_ACCESS_KEY in your shell before Terraform commands.
+
+scw_project_id = "00000000-0000-0000-0000-000000000000"
+
+cluster_name    = "hcl-public-netflow"
+scaleway_region = "fr-par"
+scaleway_zone   = "fr-par-1"
+k8s_version     = "1.37.0"
+
+# Demo defaults are intentionally small. For 300-400 samples, size SFS near
+# 2000/500 GB and raise the autoscaling ceilings after benchmarking.
+orchestrator_node_type = "POP2-4C-16G"
+orchestrator_max_nodes = 2
+compute_node_type      = "POP2-HM-8C-64G"
+compute_max_nodes      = 2
+workdir_size_gb        = 100
+reference_size_gb      = 50
+noncurrent_version_retention_days = 365
+
+# Set an RFC3339 date to enforce key expiry; rotate the key deliberately and
+# increment pipeline_secret_revision at the same time.
+# pipeline_api_key_expires_at = "2027-09-25T00:00:00Z"
+# pipeline_secret_revision   = 2
+
+tags = ["env=poc", "project=hcl-public-netflow", "pipeline=nf-core-rnaseq"]

@@ -1,0 +1,14 @@
+# Pipeline pin: nf-core/rnaseq 3.14.0 (kept for POC compatibility).
+# Upgrade only after a representative Kapsule run validates the new release.
+# Input and output are supplied explicitly by run-pipeline.sh for each run.
+
+fasta: /data/reference/GRCh38/Ensembl-110/genome.fa
+gtf: /data/reference/GRCh38/Ensembl-110/genes.gtf
+aligner: star_salmon
+save_align_intermeds: false
+save_unaligned: false
+skip_markduplicates: false
+skip_qc: false
+min_mapped_reads: 5
+# The demo subset is intentionally small; real datasets should use the pipeline default.
+extra_salmon_quant_args: '--minAssignedFrags 1'
