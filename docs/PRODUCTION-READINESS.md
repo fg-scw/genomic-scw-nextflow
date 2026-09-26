@@ -6,7 +6,7 @@ Le dépôt déploie ses ressources dans le projet Scaleway précréé `hcl-nextf
 
 Les valeurs par défaut sont destinées à un pilote : pools orchestrateur POP2-4C-16G et calcul POP2-HM-8C-64G, jusqu'à deux nœuds chacun; PVC SFS 200 Go workdir et 50 Go référence. Le chargement STAR a mesuré environ 22 MB/s sur le workdir SFS de 200 Go; aucune comparaison contrôlée avec 100 Go n'isole l'effet du changement de capacité. Le jeu d'essai est limité à 50 000 paires. Les volumes visés de 300–400 échantillons / 2,2 To ne sont pas qualifiés.
 
-Le profil opt-in `gen3_scratch_benchmark` et le pool `gen3-probe` en `fr-par-2` sont configurés. `STAR_GENOMEGENERATE` et `STAR_ALIGN` ont été mesurés; la validation du run GEN3 complet reste en attente.
+Le profil opt-in `gen3_scratch_benchmark` et le pool `gen3-probe` en `fr-par-2` sont configurés. `STAR_GENOMEGENERATE` et `STAR_ALIGN` ont été mesurés; le Job GEN3 s'est terminé avec succès à 09:52:48 UTC et la validation technique a passé. La reproductibilité des quantifications reste à revoir.
 
 ## Mesures du pilote — 25 septembre 2026 (UTC)
 
@@ -38,7 +38,7 @@ Ces mesures forment une seule série sur un seul échantillon, avec STAR en char
 
 Le pool d'essai `gen3-probe` utilise le tag Scaleway `scw-create-scratch-volume`; les pods STAR le montent sur `/scratch` par `hostPath`. Le préflight place un pod sur ce pool et vérifie un montage ext4 inscriptible, avec une source bloc distincte du système. Il ne vérifie ni le modèle NVMe ni la capacité réelle. `hostPath` n'est pas comptabilisé dans le stockage éphémère Kubernetes; `STAR_ALIGN` est donc limité à une tâche simultanée.
 
-Lors de l'essai, le tag Terraform a été appliqué au pool; le remplacement d'un nœud a créé automatiquement un volume scratch de 160 Go. Le préflight terminé sur le nouveau nœud `a873a8` a vu `/dev/sdb` en ext4 sur `/scratch`, avec 146 Go utilisables et `hostPath.type: Directory`. Après un scale-down à zéro réussi, le préflight a redimensionné le pool de 0 à 1; son Job a terminé et a été nettoyé, puis le pool a été redemandé à zéro. Sur le pod de tâche Nextflow, `hostPath.type` apparaît vide : la directive de montage utilisée ne permet pas de le fixer; le préflight, lui, exige `Directory`.
+Lors de l'essai, le tag Terraform a été appliqué au pool; le remplacement d'un nœud a créé automatiquement un volume scratch de 160 Go. Le préflight terminé sur le nouveau nœud `a873a8` a vu `/dev/sdb` en ext4 sur `/scratch`, avec 146 Go utilisables et `hostPath.type: Directory`. Après un scale-down à zéro réussi, le préflight a redimensionné le pool de 0 à 1; son Job a terminé et a été nettoyé. L'API rapporte ensuite le pool à `size=0`, `ready`. Sur le pod de tâche Nextflow, `hostPath.type` apparaît vide : la directive de montage utilisée ne permet pas de le fixer; le préflight, lui, exige `Directory`.
 
 Le profil active `scratch=true` pour `STAR_GENOMEGENERATE` et `STAR_ALIGN`. Seul `STAR_GENOMEGENERATE` force `stageInMode = 'copy'` : FASTA/GTF sont copiés depuis la référence SFS vers le scratch, puis l'index produit revient dans le workdir SFS. `STAR_ALIGN` garde le staging par défaut : l'index du workdir reste lu depuis SFS, tandis que les fichiers de travail STAR sont écrits sur `/scratch` et les sorties déclarées sont recopiées vers SFS. Le head publie ensuite les résultats depuis SFS vers S3. RSEM et les autres tâches restent sur POP2 `star-compute` en `fr-par-3`.
 
@@ -66,7 +66,9 @@ La durée de tâche GEN3 est 2,34× plus courte; le `realtime` rapporté est env
 | Lecture de l'index STAR | 29,8 GB lus depuis SFS de 09:18:42 à 09:39:35 : 20 min 53 s, contre 22 min 33 s lors du pilote POP2/SFS. Le scratch n'a pas mis l'index en cache. |
 | Même tâche sur POP2/SFS | Durée 26 min 24 s; `realtime` 26 min 23 s. |
 
-Les durées `STAR_ALIGN` sont proches et le chargement de l'index reste sur SFS; les différences de type de nœud et de zone empêchent d'attribuer un gain au scratch. Le run GEN3 complet n'est pas encore validé.
+Les durées `STAR_ALIGN` sont proches et le chargement de l'index reste sur SFS; les différences de type de nœud et de zone empêchent d'attribuer un gain au scratch.
+
+Le Job Nextflow GEN3 s'est terminé avec succès (`completionTime` 09:52:48 UTC). `make validate-run RUN_ID=gen3-scratch-20260926` a passé les contrôles techniques : 49 539 paires après trimming, 94,06 % mappés de façon unique, BAM de 7 864 439 octets, 10 036 lignes Salmon non nulles, 13 gènes featureCounts non nuls et MultiQC présent. Le BAM et featureCounts ont les mêmes tailles et ETags S3 que le baseline POP2; Salmon diffère (10 036 contre 10 052 lignes non nulles), avec 252 894 transcrits et 45 676 reads mappés dans les deux cas. La reproductibilité biologique reste à examiner; ce résultat ne qualifie pas la production.
 
 ## Qualification de 300–400 échantillons
 
