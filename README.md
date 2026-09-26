@@ -125,6 +125,16 @@ Le run utilise une entrée SRR1039508 réduite à 50 000 paires. La validation v
 make smoke-test RUN_ID=validation-20260925 RESUME=1
 ```
 
+Pour exécuter le profil GEN3, `make smoke-test` ne transmet pas l'option. Sur un cluster prêt avec la référence initialisée :
+
+```bash
+make prepare-demo RUN_ID=gen3-scratch-repeat
+bash scripts/run-pipeline.sh gen3-scratch-repeat --gen3-scratch-benchmark -- --save_align_intermeds true
+make validate-run RUN_ID=gen3-scratch-repeat
+```
+
+Avant de soumettre le Job, le script vérifie `/scratch` avec un préflight `hostPath.type: Directory` : montage ext4 séparé et inscriptible. Pour reprendre ce run, ajouter `--resume` avant `--` à la commande du script.
+
 ## POC et production
 
 Le run humain a validé le parcours e2e sur un PVC workdir SFS de 200 Go et une référence de 50 Go : le Job s'est terminé et `make validate-run` a vérifié les artefacts. Le chargement STAR a observé environ 22 MB/s sur SFS; aucune comparaison contrôlée entre les PVC de 100 et 200 Go ne permet d'attribuer un gain à l'agrandissement. Cette validation confirme le fonctionnement technique, pas la validité biologique. Les pools et PVC restent dimensionnés pour le pilote; les volumes de 300–400 échantillons ou 2,2 To, la reprise après panne, les coûts et la restauration ne sont pas qualifiés.
