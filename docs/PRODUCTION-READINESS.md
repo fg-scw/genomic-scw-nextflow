@@ -10,6 +10,8 @@ Le profil opt-in `gen3_scratch_benchmark` et le pool `gen3-probe` en `fr-par-2` 
 
 Un exercice a supprimé puis restauré un fichier de 1 MiB depuis SFS et S3 avec le même SHA-256 (`634fbf86…dbf`); les données temporaires ont été nettoyées. Cela ne qualifie pas une restauration complète.
 
+Le 26 septembre, un manifeste historique a été vérifié par SHA complet puis migré : `genome.fa` et `genes.gtf` étaient OK; les tailles enregistrées sont 3 151 425 851 B et 1 463 917 491 B. Cette opération a duré 11 min 46 s. Le bootstrap suivant a validé les tailles en 13 s sans SHA complet. Ce contrôle détecte absence et troncature, pas une corruption conservant exactement la taille; prévoir des vérifications SHA périodiques pour la production.
+
 ## Mesures du pilote — 25 septembre 2026 (UTC)
 
 Mesures faites depuis le pod head Nextflow sur `star-compute`, pendant une écriture STAR sur SFS. Les tests S3 utilisaient `curl` signé et un bucket privé temporaire du même projet.

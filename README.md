@@ -139,7 +139,7 @@ Avant de soumettre le Job, le script vérifie `/scratch` avec un préflight `hos
 
 ## POC et production
 
-Le dépôt vise la faisabilité et la stabilité d'un POC sur un petit jeu, pas l'exécution d'un lot de 300–400 échantillons ou 2,2 To; cette échelle relève d'une qualification production séparée. Le pilote a validé le parcours technique sur un PVC workdir SFS de 200 Go et une référence de 50 Go; cela ne valide pas la biologie. Le chargement STAR a observé environ 22 MB/s sur SFS, sans comparaison contrôlée entre les PVC de 100 et 200 Go. Après le SHA initial, le bootstrap conserve les tailles de FASTA/GTF et les compare aux reprises; les anciens manifestes sont vérifiés une fois par SHA avant migration. Un exercice de restauration d'un fichier de 1 MiB depuis SFS et S3 a rendu le même SHA-256 (`634fbf86…dbf`); les données de test ont été nettoyées, mais une restauration complète n'est pas qualifiée.
+Le dépôt vise la faisabilité et la stabilité d'un POC sur un petit jeu, pas l'exécution d'un lot de 300–400 échantillons ou 2,2 To; cette échelle relève d'une qualification production séparée. Le pilote a validé le parcours technique sur un PVC workdir SFS de 200 Go et une référence de 50 Go; cela ne valide pas la biologie. Le chargement STAR a observé environ 22 MB/s sur SFS, sans comparaison contrôlée entre les PVC de 100 et 200 Go. Le bootstrap d'un ancien manifeste a pris 11 min 46 s pour vérifier les fichiers et enregistrer leurs tailles (FASTA 3 151 425 851 B, GTF 1 463 917 491 B); le contrôle suivant a pris 13 s sans nouveau SHA. Un exercice de restauration d'un fichier de 1 MiB depuis SFS et S3 a rendu le même SHA-256 (`634fbf86…dbf`); les données de test ont été nettoyées, mais une restauration complète n'est pas qualifiée.
 
 Le profil opt-in `gen3_scratch_benchmark` place les étapes STAR sur `gen3-probe` en `fr-par-2`; les autres tâches restent sur `star-compute` en `fr-par-3`. Les runs POP2 et GEN3 ont passé les contrôles techniques; les FASTQ et BAM comparés ont des SHA-256 identiques. Les comptes Salmon non nuls sont 10 052 (POP2), 10 036 (GEN3 initial) et 10 040 (reprise). L'inférence Salmon est une cause probable des écarts, non démontrée; aucun seuil QC biologique précis n'est défini. Le retry `gen3-recovery-20260926` a terminé et passé `make validate-run` à 11:50:16 UTC après remplacement du nœud; quatre BAM et featureCounts sont identiques au run GEN3 précédent. Les détails figurent dans [Préparation production](docs/PRODUCTION-READINESS.md).
 
@@ -183,5 +183,12 @@ Voir [Préparation production](docs/PRODUCTION-READINESS.md) pour le périmètre
 | Timestamp UTC | Étape | Résultat observé | Pool / lieu |
 |---|---|---|---|
 | 11:12:46 | Remplacement de nœud pendant STAR | Le run `gen3-recovery-20260926` a été automatiquement repris avec le même `RUN_ID` sur `bbfe88`; une vérification manuelle dans le pod a trouvé `root=overlay` et `/scratch=/dev/sdb ext4` (~145,6 GiB). | gen3-probe |
-| 11:50:16 | Job Nextflow de reprise | Terminé avec succès; le nouveau garde `/proc/mounts` + `df` n'était pas dans son ConfigMap. | gen3-probe |
+| 11:50:16 | Job Nextflow de reprise | Terminé avec succès; le nouveau garde `/proc/mounts` + `df` n'était pas dans son ConfigMap. | star-compute (head) |
 | Après 11:50:16 | `make validate-run` | Passé : 49 539 paires après trimming, 94,06 % mappés de façon unique, BAM 7 864 439 octets, 10 040 transcrits Salmon non nuls, 13 gènes featureCounts non nuls et MultiQC présent. Quatre BAM et featureCounts sont identiques octet par octet au premier run GEN3. | — (commande locale) |
+
+## Vérification rapide de la référence — 26 septembre 2026 (UTC)
+
+| Timestamp UTC | Étape | Résultat observé | Pool / lieu |
+|---|---|---|---|
+| 11:53:41–12:05:27 | Migration d'un ancien manifeste | SHA complet passé (`genome.fa OK`, `genes.gtf OK`); tailles enregistrées : FASTA 3 151 425 851 B, GTF 1 463 917 491 B. Durée 11 min 46 s. | orchestrator |
+| 12:06:18–12:06:31 | Bootstrap suivant | Contrôle rapide des tailles réussi en 13 s, sans nouveau SHA. | orchestrator |
