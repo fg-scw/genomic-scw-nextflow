@@ -44,4 +44,15 @@ Ce test ne mesure pas encore l'effet isolé du scratch : le pilote de référenc
 
 Le scratch est local au nœud. Une interruption peut y laisser des fichiers temporaires; le remplacement du nœud les perd. Ils ne font pas partie du cache reprenable : garder le workdir sur SFS et reprendre avec le même `RUN_ID` et le même profil. Mesurer séparément les lectures SFS, les écritures scratch, les transferts stage-in/stage-out et la durée STAR; les compteurs `rchar`/`wchar` de Nextflow ne distinguent pas les montages. Ne conclure qu'après fin du Job, validation des artefacts et mesure de la reprise.
 
+## Qualification de 300–400 échantillons
+
+Le sous-ensemble de 50 000 paires valide le parcours, mais ne prédit pas la durée d'un échantillon complet. Pour `N` échantillons, mesurer `tᵢ` sur des échantillons représentatifs et estimer le temps STAR par `max(max(tᵢ), Σtᵢ / C_eff)`, plus les attentes de planification. À durées proches, cela correspond à environ `ceil(N / C_eff) × t_STAR`. `C_eff` est le parallélisme réellement observé, pas la capacité théorique du pool.
+
+| Configuration actuelle | Parallélisme STAR maximal | Ordre de grandeur des vagues STAR pour 300–400 échantillons |
+|---|---:|---:|
+| POP2 `star-compute`, deux workers au plus | 2 (effectif à mesurer; contention possible) | 150–400 |
+| GEN3 `gen3-probe`, un nœud et `maxForks=1` | 1 | 300–400 |
+
+Ajouter au temps de bout en bout le chemin critique des autres étapes, attentes et transferts; compter la génération de l'index une seule fois si elle a lieu dans ce run. Qualifier d'abord plusieurs échantillons complets couvrant les tailles réelles, puis un lot test avec autoscaling; comparer scratch activé/désactivé sur le même type de nœud et dans la même zone. Enfin tester interruption/reprise et restauration S3, SFS et state en environnement isolé, avec objectifs de durée, coût et RPO/RTO définis. Le passage en production reste conditionné à ces mesures et à la validation biologique.
+
 Ne qualifier la plateforme de production qu'après validation à l'échelle cible, tests de reprise/restauration, revue de sécurité et approbation bioinformatique.
