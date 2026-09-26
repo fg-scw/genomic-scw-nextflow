@@ -78,7 +78,7 @@ mount_record="$(awk '$2 == "/scratch" { print $1, $3; exit }' /proc/mounts)"
 mount_source="${mount_record%% *}"
 mount_type="${mount_record#* }"
 [ "$mount_type" = ext4 ] || { echo "Expected ext4 at /scratch; found ${mount_type:-no mount}" >&2; exit 1; }
-case "$mount_source" in /dev/*) ;; *) echo "Expected block device at /scratch; found ${mount_source:-no source}" >&2; exit 1 ;; esac
+[ "${mount_source#/dev/}" != "$mount_source" ] || { echo "Expected block device at /scratch; found ${mount_source:-no source}" >&2; exit 1; }
 [ "$scratch_dev" != "$root_dev" ] || { echo '/scratch is on the root filesystem, not a separate scratch volume' >&2; exit 1; }
 [ -w /scratch ] || { echo '/scratch is not writable' >&2; exit 1; }
 printf 'Verified scratch mount: source=%s filesystem=%s device=%s (root=%s)\n' "$mount_source" "$mount_type" "$scratch_dev" "$root_dev"
