@@ -61,7 +61,13 @@ while (($#)); do
 done
 
 for arg in "${EXTRA_ARGS[@]}"; do
-  [[ "$arg" != --input && "$arg" != --outdir ]] || fail "Set input/output with this script's --input and --outdir options."
+  case "$arg" in
+    --input|--input=*|--outdir|--outdir=*|-profile|-profile=*|--profile|--profile=*|\
+    -c|-c=*|-C|-C=*|--config|--config=*|-params-file|-params-file=*|--params-file|--params-file=*|\
+    -w|-w=*|-work-dir|-work-dir=*|--work-dir|--work-dir=*)
+      fail "Nextflow argument '$arg' overrides a runner-owned input, output, profile, config, or work directory."
+      ;;
+  esac
 done
 require_commands aws terraform kubectl jq
 load_bucket_outputs
@@ -82,7 +88,10 @@ mount_type="${mount_record#* }"
 [ "${mount_source#/dev/}" != "$mount_source" ] || { echo "Expected block device at /scratch; found ${mount_source:-no source}" >&2; exit 1; }
 [ "$scratch_dev" != "$root_dev" ] || { echo '/scratch is on the root filesystem, not a separate scratch volume' >&2; exit 1; }
 [ -w /scratch ] || { echo '/scratch is not writable' >&2; exit 1; }
-printf 'Verified scratch mount: source=%s filesystem=%s device=%s (root=%s)\n' "$mount_source" "$mount_type" "$scratch_dev" "$root_dev"
+available_kib="$(df -Pk /scratch | awk 'NR == 2 { print $4 }')"
+case "$available_kib" in ''|*[!0-9]*) echo 'Could not determine available /scratch capacity' >&2; exit 1 ;; esac
+[ "$available_kib" -ge 62914560 ] || { echo "Expected at least 60 GiB free on /scratch; found ${available_kib} KiB" >&2; exit 1; }
+printf 'Verified scratch mount: source=%s filesystem=%s device=%s (root=%s) available=%sKiB\n' "$mount_source" "$mount_type" "$scratch_dev" "$root_dev" "$available_kib"
 SH
 )"
 
@@ -143,12 +152,6 @@ JOB_TIMEOUT_SECONDS="${NEXTFLOW_JOB_TIMEOUT_SECONDS:-86400}"
 [[ "$JOB_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail "NEXTFLOW_JOB_TIMEOUT_SECONDS must be a positive integer."
 JOB="nextflow-${RUN_ID}"
 CONFIGMAP="${JOB}-config"
-PROFILES="scaleway_kapsule"
-if (( GEN3_SCRATCH_BENCHMARK )); then
-  PROFILES+=",gen3_scratch_benchmark"
-  verify_gen3_scratch_mount
-fi
-
 if kubectl get job "$JOB" -n "$NS" >/dev/null 2>&1; then
   old_job="$(kubectl get job "$JOB" -n "$NS" -o json)"
   active="$(jq -r '.status.active // 0' <<<"$old_job")"
@@ -161,6 +164,12 @@ if kubectl get job "$JOB" -n "$NS" >/dev/null 2>&1; then
   else
     kubectl delete job "$JOB" -n "$NS" --wait=true >/dev/null
   fi
+fi
+
+PROFILES="scaleway_kapsule"
+if (( GEN3_SCRATCH_BENCHMARK )); then
+  PROFILES+=",gen3_scratch_benchmark"
+  verify_gen3_scratch_mount
 fi
 
 kubectl create configmap "$CONFIGMAP" -n "$NS" \
