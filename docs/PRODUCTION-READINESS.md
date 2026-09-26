@@ -6,7 +6,7 @@ Le dépôt déploie ses ressources dans le projet Scaleway précréé `hcl-nextf
 
 Les valeurs par défaut sont destinées à un pilote : pools orchestrateur POP2-4C-16G et calcul POP2-HM-8C-64G, jusqu'à deux nœuds chacun; PVC SFS 200 Go workdir et 50 Go référence. Le chargement STAR a mesuré environ 22 MB/s sur le workdir SFS de 200 Go; aucune comparaison contrôlée avec 100 Go n'isole l'effet du changement de capacité. Le jeu d'essai est limité à 50 000 paires. Les volumes visés de 300–400 échantillons / 2,2 To ne sont pas qualifiés.
 
-Le profil opt-in `gen3_scratch_benchmark` et le pool `gen3-probe` en `fr-par-2` sont configurés. `STAR_GENOMEGENERATE` a été mesuré; `STAR_ALIGN` est en cours et le run GEN3 complet n'est pas encore validé.
+Le profil opt-in `gen3_scratch_benchmark` et le pool `gen3-probe` en `fr-par-2` sont configurés. `STAR_GENOMEGENERATE` et `STAR_ALIGN` ont été mesurés; la validation du run GEN3 complet reste en attente.
 
 ## Mesures du pilote — 25 septembre 2026 (UTC)
 
@@ -36,7 +36,9 @@ Ces mesures forment une seule série sur un seul échantillon, avec STAR en char
 
 ## Scratch NVMe local
 
-Le pool d'essai `gen3-probe` utilise le tag Scaleway `scw-create-scratch-volume`; les pods STAR le montent sur `/scratch` par `hostPath`. Le préflight place un pod sur ce pool et vérifie un montage ext4 inscriptible, avec une source bloc distincte du système. Il ne vérifie ni le modèle NVMe ni la capacité réelle. Le profil indique 160 Go comme point de vigilance : relever la taille effectivement montée avant le test. `hostPath` n'est pas comptabilisé dans le stockage éphémère Kubernetes; `STAR_ALIGN` est donc limité à une tâche simultanée.
+Le pool d'essai `gen3-probe` utilise le tag Scaleway `scw-create-scratch-volume`; les pods STAR le montent sur `/scratch` par `hostPath`. Le préflight place un pod sur ce pool et vérifie un montage ext4 inscriptible, avec une source bloc distincte du système. Il ne vérifie ni le modèle NVMe ni la capacité réelle. `hostPath` n'est pas comptabilisé dans le stockage éphémère Kubernetes; `STAR_ALIGN` est donc limité à une tâche simultanée.
+
+Lors de l'essai, le tag Terraform a été appliqué au pool; le remplacement d'un nœud a créé automatiquement un volume scratch de 160 Go. Le préflight a vu `/dev/sdb` en ext4 sur `/scratch`, avec `hostPath.type: Directory`. Le scale-down à zéro a réussi; un préflight en attente a redimensionné le pool de 0 à 1, mais le pod préflight n'a pas encore terminé. Sur le pod de tâche Nextflow, `hostPath.type` apparaît vide : la directive de montage utilisée ne permet pas de le fixer; le préflight, lui, exige `Directory`.
 
 Le profil active `scratch=true` pour `STAR_GENOMEGENERATE` et `STAR_ALIGN`. Seul `STAR_GENOMEGENERATE` force `stageInMode = 'copy'` : FASTA/GTF sont copiés depuis la référence SFS vers le scratch, puis l'index produit revient dans le workdir SFS. `STAR_ALIGN` garde le staging par défaut : l'index du workdir reste lu depuis SFS, tandis que les fichiers de travail STAR sont écrits sur `/scratch` et les sorties déclarées sont recopiées vers SFS. Le head publie ensuite les résultats depuis SFS vers S3. RSEM et les autres tâches restent sur POP2 `star-compute` en `fr-par-3`.
 
@@ -54,7 +56,17 @@ Le scratch est local au nœud. Une interruption peut y laisser des fichiers temp
 | Sortie | Index de 29,8 GB recopié vers SFS; fin vers 09:16:56, soit environ 22 min 40 s à ~22 MB/s. |
 | Même tâche sur POP2/SFS | Durée Nextflow 2 h 39 min 57 s; `realtime` 2 h 39 min 55 s. |
 
-La durée de tâche GEN3 est 2,34× plus courte; le `realtime` rapporté est environ 4,36× plus court. Cette comparaison n'isole pas l'effet du scratch : type de nœud et zone diffèrent. `STAR_ALIGN` est encore en cours; ces mesures ne valident pas le run GEN3 complet.
+La durée de tâche GEN3 est 2,34× plus courte; le `realtime` rapporté est environ 4,36× plus court. Cette comparaison n'isole pas l'effet du scratch : type de nœud et zone diffèrent.
+
+### Mesure de `STAR_ALIGN` sur GEN3 — 26 septembre 2026 (UTC)
+
+| Étape / métrique | Résultat observé |
+|---|---|
+| Tâche GEN3 | Début à 09:17:02; durée 25 min 31 s, `realtime` 25 min 29 s. |
+| Lecture de l'index STAR | 29,8 GB lus depuis SFS de 09:18:42 à 09:39:35 : 20 min 53 s, contre 22 min 33 s lors du pilote POP2/SFS. Le scratch n'a pas mis l'index en cache. |
+| Même tâche sur POP2/SFS | Durée 26 min 24 s; `realtime` 26 min 23 s. |
+
+Les durées `STAR_ALIGN` sont proches et le chargement de l'index reste sur SFS; les différences de type de nœud et de zone empêchent d'attribuer un gain au scratch. Le run GEN3 complet n'est pas encore validé.
 
 ## Qualification de 300–400 échantillons
 
