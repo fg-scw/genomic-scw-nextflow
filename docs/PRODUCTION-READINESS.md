@@ -6,6 +6,8 @@ Le dépôt déploie ses ressources dans le projet Scaleway précréé `hcl-nextf
 
 Les valeurs par défaut sont destinées à un pilote : pools orchestrateur POP2-4C-16G et calcul POP2-HM-8C-64G, jusqu'à deux nœuds chacun; PVC SFS 200 Go workdir et 50 Go référence. Le chargement STAR a mesuré environ 22 MB/s sur le workdir SFS de 200 Go; aucune comparaison contrôlée avec 100 Go n'isole l'effet du changement de capacité. Le jeu d'essai est limité à 50 000 paires. Les volumes visés de 300–400 échantillons / 2,2 To ne sont pas qualifiés.
 
+Le profil opt-in `gen3_scratch_benchmark` et le pool `gen3-probe` en `fr-par-2` sont configurés; le run de benchmark est en cours. Ses résultats ne sont pas encore disponibles.
+
 ## Mesures du pilote — 25 septembre 2026 (UTC)
 
 Mesures faites depuis le pod head Nextflow sur `star-compute`, pendant une écriture STAR sur SFS. Les tests S3 utilisaient `curl` signé et un bucket privé temporaire du même projet.
@@ -34,8 +36,12 @@ Ces mesures forment une seule série sur un seul échantillon, avec STAR en char
 
 ## Scratch NVMe local
 
-Les instances Scaleway GEN3 MEMORY exposent du NVMe local éphémère, à benchmarker pour les tâches STAR intensives en I/O. Ce POC ne le monte pas : `scratch=true` seul ne choisit ni ne monte ce NVMe. Il faut déclarer explicitement le volume et son montage dans les pods de tâches et garantir leur placement sur les nœuds qui l'exposent.
+Le pool d'essai `gen3-probe` utilise le tag Scaleway `scw-create-scratch-volume`; les pods STAR le montent sur `/scratch` par `hostPath`. Le préflight place un pod sur ce pool et vérifie un montage ext4 inscriptible, avec une source bloc distincte du système. Il ne vérifie ni le modèle NVMe ni la capacité réelle. Le profil indique 160 Go comme point de vigilance : relever la taille effectivement montée avant le test. `hostPath` n'est pas comptabilisé dans le stockage éphémère Kubernetes; `STAR_ALIGN` est donc limité à une tâche simultanée.
 
-Le scratch est local au nœud, non partagé et perdu avec le pod ou le nœud. Réserver SFS au workdir reprenable et aux références partagées, S3 aux entrées et résultats persistants. Comparer le débit STAR, le coût et le comportement après rescheduling avant adoption.
+Le profil active `scratch=true` pour `STAR_GENOMEGENERATE` et `STAR_ALIGN`. Seul `STAR_GENOMEGENERATE` force `stageInMode = 'copy'` : FASTA/GTF sont copiés depuis la référence SFS vers le scratch, puis l'index produit revient dans le workdir SFS. `STAR_ALIGN` garde le staging par défaut : l'index du workdir reste lu depuis SFS, tandis que les fichiers de travail STAR sont écrits sur `/scratch` et les sorties déclarées sont recopiées vers SFS. Le head publie ensuite les résultats depuis SFS vers S3. RSEM et les autres tâches restent sur POP2 `star-compute` en `fr-par-3`.
+
+Ce test ne mesure pas encore l'effet isolé du scratch : le pilote de référence utilisait POP2 en `fr-par-3`, tandis que le pool MEMORY3 d'essai est en `fr-par-2`; le type de nœud et la zone changent aussi. Pour attribuer un gain au stockage local, comparer scratch activé et désactivé sur le même type de nœud et dans la même zone. La limite à une tâche STAR et le jeu pilote de 50 000 paires ne qualifient pas un lot de 300–400 échantillons. En particulier, scratch ne supprime pas les lectures d'index observées sur SFS par `STAR_ALIGN`.
+
+Le scratch est local au nœud. Une interruption peut y laisser des fichiers temporaires; le remplacement du nœud les perd. Ils ne font pas partie du cache reprenable : garder le workdir sur SFS et reprendre avec le même `RUN_ID` et le même profil. Mesurer séparément les lectures SFS, les écritures scratch, les transferts stage-in/stage-out et la durée STAR; les compteurs `rchar`/`wchar` de Nextflow ne distinguent pas les montages. Ne conclure qu'après fin du Job, validation des artefacts et mesure de la reprise.
 
 Ne qualifier la plateforme de production qu'après validation à l'échelle cible, tests de reprise/restauration, revue de sécurité et approbation bioinformatique.

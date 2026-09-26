@@ -29,6 +29,7 @@ make run-pipeline RUN_ID=<run-id> RESUME=1
 | `validate-run` échoue sur macOS avec une classe awk non terminée | Slash non échappé dans une classe regex awk. | Séparer les clés S3 avec `awk -F/` et comparer les champs chemin; éviter `[^/]` dans une regex awk. |
 | `validate-run` ne trouve pas `quant.sf` | Le chemin supposé incluait `/salmon/`; nf-core/rnaseq 3.14.0 publie `star_salmon/<sample>/quant.sf`. | Valider les chemins contre les clés S3 réellement publiées par la version du pipeline. |
 | Pod STAR reste `Terminating` en état D/I/O | Processus bloqué en attente d'I/O sur le stockage. | Attendre sa disparition effective avant reprise; inspecter nœud et stockage, ne pas le supprimer de force. |
+| Fichiers STAR subsistent sur `/scratch` après interruption | Le scratch `hostPath` est local au nœud; l'arrêt brutal peut empêcher le nettoyage de la tâche. | Reprendre depuis le workdir SFS avec le même `RUN_ID`; ne pas compter sur ces fichiers. Le remplacement du nœud les perd. |
 | Débit SFS faible avec 100 Go | Limite de débit du volume sur le profil pilote. | Le workdir pilote est passé à 200 Go; mesurer le gain avant dimensionnement production. |
 | `terraform -chdir=terraform/infra plan` échoue en refresh avec `GetBucketCors` HTTP 403 sur input/results | Le principal opérateur n'était pas autorisé dans les politiques restrictives des buckets. | Résolu : renseigner `operator_user_id`; le plan Terraform complet avec refresh réussit après ajout des statements aux deux policies. Garder le refresh activé; ne pas utiliser `-refresh=false` en routine. |
 

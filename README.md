@@ -8,14 +8,18 @@ Le pipeline utilise `nf-k8s` 1.2.2, `nf-amazon` 3.4.1 et GRCh38 Ensembl 110. Les
 
 ```mermaid
 flowchart LR
-  subgraph SCW["Projet hcl-nextflow · fr-par-3"]
+  subgraph SCW["Projet hcl-nextflow · région fr-par"]
     subgraph K["Kapsule 1.37.0"]
-      subgraph O["Pool orchestrator"]
-        REF["Job bootstrap<br/>GRCh38 Ensembl 110"]
+      subgraph AZ3["fr-par-3"]
+        REF["Bootstrap · orchestrator<br/>POP2-4C-16G"]
+        HEAD["Head Nextflow<br/>star-compute · POP2-HM-8C-64G"]
+        TASKS["Pods nf-core par défaut<br/>STAR et RSEM sur POP2"]
       end
-      subgraph C["Pool star-compute"]
-        HEAD["Job head Nextflow"]
-        TASKS["Pods de tâches nf-core<br/>dont STAR"]
+      subgraph AZ2["fr-par-2 · profil STAR opt-in"]
+        GEN3["Nœud gen3-probe<br/>MEMORY3-X8C-64G<br/>scw-create-scratch-volume"]
+        STAR["Pods STAR_ALIGN / STAR_GENOMEGENERATE"]
+        NVME[("NVMe local<br/>hostPath /scratch · éphémère")]
+        BLOCK["Block Storage sbs_5k<br/>racine gen3-probe seulement"]
       end
     end
     WORK[("SFS RWX<br/>workdir · 200 Go")]
@@ -23,24 +27,24 @@ flowchart LR
     SHEET[("Object Storage<br/>samplesheet")]
     FASTQ[("Object Storage<br/>FASTQ")]
     RESULTS[("Object Storage<br/>résultats")]
-    BLOCK["Block Storage sbs_5k<br/>disques système des nœuds<br/>pas le workdir/référence"]
-    NVME["GEN3 MEMORY NVMe<br/>option scratch · non déployée"]
   end
 
   REF -->|"écrit la référence"| REFVOL
-  REFVOL -->|"lecture seule"| TASKS
+  REFVOL -->|"FASTA/GTF pour STAR_GENOMEGENERATE"| STAR
+  REFVOL -->|"lecture de référence par défaut"| TASKS
   HEAD -->|"orchestration"| TASKS
+  HEAD -.->|"profil gen3_scratch_benchmark"| STAR
+  GEN3 --> STAR
   SHEET -->|"lecture au lancement"| HEAD
   FASTQ -->|"source des reads"| HEAD
   HEAD <-->|"staging FASTQ / reprise"| WORK
-  WORK -->|"FASTQ stagés"| TASKS
+  WORK -->|"index lu par STAR_ALIGN sur SFS"| STAR
+  STAR -->|"sorties déclarées vers SFS"| WORK
+  STAR -->|"fichiers temporaires"| NVME
+  WORK -->|"workdir partagé"| TASKS
   TASKS -->|"sorties de tâches"| WORK
   HEAD -->|"publishDir depuis le workdir SFS"| RESULTS
-  O -->|"disques système"| BLOCK
-  C -->|"disques système"| BLOCK
-  TASKS -.->|"benchmark futur; montage explicite requis"| NVME
-  classDef optional stroke-dasharray: 5 5;
-  class NVME optional;
+  GEN3 --> BLOCK
 ```
 
 ## Workflow
@@ -125,9 +129,11 @@ make smoke-test RUN_ID=validation-20260925 RESUME=1
 
 Le run humain a validé le parcours e2e sur un PVC workdir SFS de 200 Go et une référence de 50 Go : le Job s'est terminé et `make validate-run` a vérifié les artefacts. Le chargement STAR a observé environ 22 MB/s sur SFS; aucune comparaison contrôlée entre les PVC de 100 et 200 Go ne permet d'attribuer un gain à l'agrandissement. Cette validation confirme le fonctionnement technique, pas la validité biologique. Les pools et PVC restent dimensionnés pour le pilote; les volumes de 300–400 échantillons ou 2,2 To, la reprise après panne, les coûts et la restauration ne sont pas qualifiés.
 
+Le profil opt-in `gen3_scratch_benchmark` place les étapes STAR sur `gen3-probe` en `fr-par-2` avec `/scratch`; les autres tâches, dont RSEM, restent sur `star-compute` en `fr-par-3`. Le benchmark est en cours; aucune mesure de performance n'est encore publiée.
+
 Avant toute production, faire un benchmark représentatif STAR, dimensionner SFS/autoscaling, tester reprise et restauration, définir rétention/observabilité, et faire valider les métriques QC. Les permissions IAM objet sont à l'échelle du projet : séparer aussi le backend Terraform dans un projet isolé ou protéger explicitement les autres buckets.
 
-Les instances GEN3 MEMORY offrent une option de benchmark scratch NVMe local; elle n'est pas activée ici. Voir [Préparation production](docs/PRODUCTION-READINESS.md). Les opérations de reprise et destruction sont dans [Exploitation](docs/OPERATIONS.md).
+Voir [Préparation production](docs/PRODUCTION-READINESS.md) pour le périmètre et les limites du benchmark scratch. Les opérations de reprise et destruction sont dans [Exploitation](docs/OPERATIONS.md).
 
 ## Observations du pilote — 25 septembre 2026 (UTC)
 
