@@ -16,6 +16,8 @@ Pour reprendre un run, conserver le même `RUN_ID` et ne passer `RESUME=1` qu'ap
 make run-pipeline RUN_ID=<run-id> RESUME=1
 ```
 
+Le runner conserve l'UUID de session Nextflow dans le PVC workdir, sous `.nextflow/sessions/<RUN_ID>`, puis passe cet UUID à `-resume`. Pour un run échoué créé avant ce suivi, retrouver son UUID dans l'historique ou le log Nextflow et créer ce fichier sur le PVC avant `RESUME=1`; le runner refuse de deviner la session globale la plus récente.
+
 ## Incidents rencontrés
 
 | Symptôme | Cause | Protection / reprise |

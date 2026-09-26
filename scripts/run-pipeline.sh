@@ -64,8 +64,8 @@ for arg in "${EXTRA_ARGS[@]}"; do
   case "$arg" in
     --input|--input=*|--outdir|--outdir=*|-profile|-profile=*|--profile|--profile=*|\
     -c|-c=*|-C|-C=*|--config|--config=*|-params-file|-params-file=*|--params-file|--params-file=*|\
-    -w|-w=*|-work-dir|-work-dir=*|--work-dir|--work-dir=*)
-      fail "Nextflow argument '$arg' overrides a runner-owned input, output, profile, config, or work directory."
+    -w|-w=*|-work-dir|-work-dir=*|--work-dir|--work-dir=*|-resume|-resume=*)
+      fail "Nextflow argument '$arg' overrides a runner-owned input, output, profile, config, work directory, or resume session."
       ;;
   esac
 done
@@ -175,6 +175,7 @@ fi
 kubectl create configmap "$CONFIGMAP" -n "$NS" \
   --from-file=nextflow.config="${REPO_ROOT}/nextflow/nextflow.config" \
   --from-file=params.yaml="${REPO_ROOT}/nextflow/params.yaml" \
+  --from-file=entrypoint.sh="${REPO_ROOT}/scripts/nextflow-entrypoint.sh" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
 nf_args=(
@@ -189,14 +190,11 @@ nf_args=(
   -with-timeline "/data/workdir/timeline-${RUN_ID}.html"
   -with-trace "/data/workdir/trace-${RUN_ID}.txt"
 )
-if (( RESUME )); then
-  nf_args+=(-resume)
-fi
 nf_args+=("${EXTRA_ARGS[@]}")
 args_json="$(jq -cn --args '$ARGS.positional' -- "${nf_args[@]}")"
 
 kubectl create job "$JOB" -n "$NS" --image="$NEXTFLOW_IMAGE" --dry-run=client -o json \
-  | jq --argjson args "$args_json" --argjson timeout "$JOB_TIMEOUT_SECONDS" --arg configmap "$CONFIGMAP" --arg region "$S3_REGION" '
+  | jq --argjson args "$args_json" --argjson timeout "$JOB_TIMEOUT_SECONDS" --arg configmap "$CONFIGMAP" --arg region "$S3_REGION" --arg runId "$RUN_ID" --arg resume "$RESUME" '
       .spec.backoffLimit = 0 |
       .spec.ttlSecondsAfterFinished = 86400 |
       .spec.activeDeadlineSeconds = $timeout |
@@ -204,7 +202,7 @@ kubectl create job "$JOB" -n "$NS" --image="$NEXTFLOW_IMAGE" --dry-run=client -o
       .spec.template.spec.serviceAccountName = "nextflow" |
       .spec.template.spec.automountServiceAccountToken = true |
       .spec.template.spec.nodeSelector = {"k8s.scaleway.com/pool-name": "star-compute"} |
-      .spec.template.spec.containers[0].command = ["nextflow"] |
+      .spec.template.spec.containers[0].command = ["sh", "/config/entrypoint.sh"] |
       .spec.template.spec.containers[0].args = $args |
       .spec.template.spec.containers[0].workingDir = "/data/workdir" |
       .spec.template.spec.containers[0].resources = {
@@ -217,6 +215,8 @@ kubectl create job "$JOB" -n "$NS" --image="$NEXTFLOW_IMAGE" --dry-run=client -o
         {name: "AWS_ENDPOINT_URL_S3", valueFrom: {secretKeyRef: {name: "pipeline-s3-credentials", key: "s3-endpoint"}}},
         {name: "AWS_DEFAULT_REGION", value: $region},
         {name: "NXF_HOME", value: "/data/workdir/.nextflow"},
+        {name: "RUN_ID", value: $runId},
+        {name: "RUN_RESUME", value: $resume},
         {name: "NXF_ANSI_LOG", value: "false"}
       ] |
       .spec.template.spec.containers[0].volumeMounts = [
