@@ -5,11 +5,13 @@ source "$(cd "$(dirname "$0")" && pwd)/common.sh"
 usage() {
   cat <<'USAGE'
 Usage: scripts/run-pipeline.sh <run-id> [--input s3://bucket/samplesheet.csv]
-       [--outdir s3://bucket/prefix] [--resume] [-- nf-core args...]
+       [--outdir s3://bucket/prefix] [--resume] [--gen3-scratch-benchmark]
+       [-- nf-core args...]
 
 Default input:  s3://<input bucket>/validation/<run-id>/samplesheet.csv
 Default output: s3://<results bucket>/runs/<run-id>
 Use --resume to reuse the same run's Nextflow cache after a failed/incomplete run.
+Use --gen3-scratch-benchmark only after verifying the gen3-probe /scratch NVMe mount.
 USAGE
 }
 
@@ -21,6 +23,7 @@ validate_run_id "$RUN_ID"
 INPUT_URI=""
 OUTPUT_URI=""
 RESUME=0
+GEN3_SCRATCH_BENCHMARK=0
 declare -a EXTRA_ARGS=()
 while (($#)); do
   case "$1" in
@@ -36,6 +39,10 @@ while (($#)); do
       ;;
     --resume)
       RESUME=1
+      shift
+      ;;
+    --gen3-scratch-benchmark)
+      GEN3_SCRATCH_BENCHMARK=1
       shift
       ;;
     --)
@@ -59,6 +66,54 @@ done
 require_commands aws terraform kubectl jq
 load_bucket_outputs
 require_kubernetes_platform
+
+verify_gen3_scratch_mount() {
+  local check_job="gen3-scratch-check-${RUN_ID}"
+  local check_cmd
+  check_cmd="$(cat <<'SH'
+set -eu
+scratch_dev="$(stat -c %d /scratch)"
+root_dev="$(stat -c %d /)"
+mount_record="$(awk '$2 == "/scratch" { print $1, $3; exit }' /proc/mounts)"
+mount_source="${mount_record%% *}"
+mount_type="${mount_record#* }"
+[ "$mount_type" = ext4 ] || { echo "Expected ext4 at /scratch; found ${mount_type:-no mount}" >&2; exit 1; }
+case "$mount_source" in /dev/*) ;; *) echo "Expected block device at /scratch; found ${mount_source:-no source}" >&2; exit 1 ;; esac
+[ "$scratch_dev" != "$root_dev" ] || { echo '/scratch is on the root filesystem, not a separate scratch volume' >&2; exit 1; }
+[ -w /scratch ] || { echo '/scratch is not writable' >&2; exit 1; }
+printf 'Verified scratch mount: source=%s filesystem=%s device=%s (root=%s)\n' "$mount_source" "$mount_type" "$scratch_dev" "$root_dev"
+SH
+)"
+
+  kubectl delete job "$check_job" -n "$NS" --ignore-not-found --wait=true >/dev/null
+  kubectl create job "$check_job" -n "$NS" --image="$NEXTFLOW_IMAGE" --dry-run=client -o json \
+    | jq --arg check "$check_cmd" '
+        .spec.backoffLimit = 0 |
+        .spec.template.spec.restartPolicy = "Never" |
+        .spec.template.spec.automountServiceAccountToken = false |
+        .spec.template.spec.nodeSelector = {"k8s.scaleway.com/pool-name": "gen3-probe"} |
+        .spec.template.spec.tolerations = [
+          {key: "workload", value: "gen3-probe", operator: "Equal", effect: "NoSchedule"}
+        ] |
+        .spec.template.spec.containers[0].command = ["sh", "-c", $check] |
+        .spec.template.spec.containers[0].resources = {
+          requests: {cpu: "10m", memory: "16Mi"},
+          limits: {cpu: "100m", memory: "128Mi"}
+        } |
+        .spec.template.spec.volumeMounts = [{name: "scratch", mountPath: "/scratch"}] |
+        .spec.template.spec.volumes = [{name: "scratch", hostPath: {path: "/scratch", type: "Directory"}}] |
+        .spec.activeDeadlineSeconds = 180
+      ' \
+    | kubectl apply -f - >/dev/null
+
+  if ! kubectl wait --for=condition=complete "job/${check_job}" -n "$NS" --timeout=180s; then
+    kubectl logs -n "$NS" "job/${check_job}" >&2 || true
+    kubectl describe job "$check_job" -n "$NS" >&2 || true
+    fail "gen3-probe /scratch preflight failed; pipeline Job was not submitted."
+  fi
+  kubectl logs -n "$NS" "job/${check_job}"
+  kubectl delete job "$check_job" -n "$NS" --wait=true >/dev/null
+}
 
 INPUT_URI="${INPUT_URI:-$(s3_input_uri "$RUN_ID")}"
 OUTPUT_URI="${OUTPUT_URI:-$(s3_output_uri "$RUN_ID")}"
@@ -88,6 +143,10 @@ JOB_TIMEOUT_SECONDS="${NEXTFLOW_JOB_TIMEOUT_SECONDS:-86400}"
 JOB="nextflow-${RUN_ID}"
 CONFIGMAP="${JOB}-config"
 PROFILES="scaleway_kapsule"
+if (( GEN3_SCRATCH_BENCHMARK )); then
+  PROFILES+=",gen3_scratch_benchmark"
+  verify_gen3_scratch_mount
+fi
 
 if kubectl get job "$JOB" -n "$NS" >/dev/null 2>&1; then
   old_job="$(kubectl get job "$JOB" -n "$NS" -o json)"
@@ -168,6 +227,7 @@ kubectl create job "$JOB" -n "$NS" --image="$NEXTFLOW_IMAGE" --dry-run=client -o
 printf 'Nextflow Job: %s\n' "$JOB"
 printf 'Cluster ID: %s\nNamespace: %s\nPipeline: %s @ %s\n' "$CLUSTER_ID" "$NS" "$PIPELINE" "$NF_VERSION"
 printf 'Input: %s\nOutput: %s\nResume: %s\n' "$INPUT_URI" "$OUTPUT_URI" "$([[ $RESUME == 1 ]] && printf yes || printf no)"
+(( GEN3_SCRATCH_BENCHMARK == 0 )) || printf 'Scratch benchmark: gen3-probe /scratch (STAR stages)\n'
 printf 'Follow logs: kubectl logs -n %s -f job/%s\n' "$NS" "$JOB"
 (kubectl logs -n "$NS" -f "job/${JOB}" --pod-running-timeout="${JOB_TIMEOUT_SECONDS}s" || true) &
 LOG_PID=$!
