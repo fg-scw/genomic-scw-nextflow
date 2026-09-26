@@ -10,8 +10,8 @@ if kubectl get job "$JOB" -n "$NS" >/dev/null 2>&1; then
   succeeded="$(kubectl get job "$JOB" -n "$NS" -o json | jq -r '.status.succeeded // 0')"
   active="$(kubectl get job "$JOB" -n "$NS" -o json | jq -r '.status.active // 0')"
   if [[ "$succeeded" == "1" ]]; then
-    printf 'Reference bootstrap already completed: GRCh38 Ensembl release 110.\n'
-    exit 0
+    printf 'Revalidating reference PVC with a fresh Job: %s...\n' "$JOB"
+    kubectl delete job "$JOB" -n "$NS" --wait=true >/dev/null
   elif (( active > 0 )); then
     printf 'Waiting for existing reference bootstrap Job %s...\n' "$JOB"
   else

@@ -44,8 +44,8 @@ input_reads="$(awk -F '|' '/Number of input reads/ {gsub(/[[:space:]]/, "", $2);
 mapped_pct="$(awk -F '|' '/Uniquely mapped reads %/ {gsub(/[[:space:]%]/, "", $2); print $2; exit}' "${TMP_DIR}/Log.final.out")"
 [[ "${input_reads:-0}" =~ ^[0-9]+$ ]] && (( input_reads >= 45000 )) \
   || fail "STAR reported fewer than 45,000 input reads after trimming; expected at least 90% retention from the 50,000-pair demo subset."
-awk -v pct="${mapped_pct:-0}" 'BEGIN {exit !(pct + 0 >= 5)}' \
-  || fail "STAR unique mapping rate is below 5%; expected human GRCh38 reads."
+awk -v pct="${mapped_pct:-0}" 'BEGIN {exit !(pct + 0 >= 90)}' \
+  || fail "STAR unique mapping rate is below 90%; expected at least 90% for SRR1039508 against human GRCh38."
 
 bam_key="$(tr '\t' '\n' <<<"$keys" | awk -F/ '$NF ~ /SRR1039508.*[.]bam$/ && $(NF-1) == "star_salmon" {print; exit}')"
 [[ -n "$bam_key" ]] || fail "No saved STAR BAM found; the validation run must include --save_align_intermeds true."
