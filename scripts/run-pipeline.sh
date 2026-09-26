@@ -89,7 +89,7 @@ mount_type="${mount_record#* }"
 [ "$scratch_dev" != "$root_dev" ] || { echo '/scratch is on the root filesystem, not a separate scratch volume' >&2; exit 1; }
 [ -w /scratch ] || { echo '/scratch is not writable' >&2; exit 1; }
 available_kib="$(df -Pk /scratch | awk 'NR == 2 { print $4 }')"
-case "$available_kib" in ''|*[!0-9]*) echo 'Could not determine available /scratch capacity' >&2; exit 1 ;; esac
+printf '%s\n' "$available_kib" | grep -Eq '^[0-9]+$' || { echo 'Could not determine available /scratch capacity' >&2; exit 1; }
 [ "$available_kib" -ge 62914560 ] || { echo "Expected at least 60 GiB free on /scratch; found ${available_kib} KiB" >&2; exit 1; }
 printf 'Verified scratch mount: source=%s filesystem=%s device=%s (root=%s) available=%sKiB\n' "$mount_source" "$mount_type" "$scratch_dev" "$root_dev" "$available_kib"
 SH
