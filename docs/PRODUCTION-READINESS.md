@@ -6,7 +6,7 @@ Le dépôt déploie ses ressources dans le projet Scaleway précréé `hcl-nextf
 
 Les valeurs par défaut sont destinées à un pilote : pools orchestrateur POP2-4C-16G et calcul POP2-HM-8C-64G, jusqu'à deux nœuds chacun; PVC SFS 200 Go workdir et 50 Go référence. Le chargement STAR a mesuré environ 22 MB/s sur le workdir SFS de 200 Go; aucune comparaison contrôlée avec 100 Go n'isole l'effet du changement de capacité. Le jeu d'essai est limité à 50 000 paires. Les volumes visés de 300–400 échantillons / 2,2 To ne sont pas qualifiés.
 
-Le profil opt-in `gen3_scratch_benchmark` et le pool `gen3-probe` en `fr-par-2` sont configurés; le run de benchmark est en cours. Ses résultats ne sont pas encore disponibles.
+Le profil opt-in `gen3_scratch_benchmark` et le pool `gen3-probe` en `fr-par-2` sont configurés. `STAR_GENOMEGENERATE` a été mesuré; `STAR_ALIGN` est en cours et le run GEN3 complet n'est pas encore validé.
 
 ## Mesures du pilote — 25 septembre 2026 (UTC)
 
@@ -24,7 +24,7 @@ Mesures faites depuis le pod head Nextflow sur `star-compute`, pendant une écri
 | STAR, lecture réelle du génome depuis SFS | `Genome` 3 219 295 493 B + `SA` 24 990 345 232 B + `SAindex` 1 565 873 619 B (29,8 GB) chargés de 18:59:56 à 19:22:29 UTC : 22 min 33 s, ~22 MB/s overhead inclus. |
 | `/tmp` overlay du conteneur | Baseline 64 MiB : écriture 0,092 s, lecture 0,066 s; `fsync` 4 KiB : p50 1,70 ms. |
 
-Ces mesures forment une seule série sur un seul échantillon, avec STAR en charge. `curl` ne passe pas par le plugin S3 Nextflow; `POSIX_FADV_DONTNEED` ne garantit pas l'absence de cache. `/tmp` est l'overlay du conteneur, pas un benchmark Block Storage. Les disques système Block Storage sbs_5k et le scratch NVMe GEN3 n'ont pas été benchmarkés directement. Le bucket temporaire et les fichiers de test ont été supprimés.
+Ces mesures forment une seule série sur un seul échantillon, avec STAR en charge. `curl` ne passe pas par le plugin S3 Nextflow; `POSIX_FADV_DONTNEED` ne garantit pas l'absence de cache. `/tmp` est l'overlay du conteneur, pas un benchmark Block Storage. Les disques système Block Storage sbs_5k et le scratch NVMe GEN3 n'ont pas fait l'objet d'un benchmark disque isolé. Le bucket temporaire et les fichiers de test ont été supprimés.
 
 ## Avant données de production
 
@@ -43,6 +43,18 @@ Le profil active `scratch=true` pour `STAR_GENOMEGENERATE` et `STAR_ALIGN`. Seul
 Ce test ne mesure pas encore l'effet isolé du scratch : le pilote de référence utilisait POP2 en `fr-par-3`, tandis que le pool MEMORY3 d'essai est en `fr-par-2`; le type de nœud et la zone changent aussi. Pour attribuer un gain au stockage local, comparer scratch activé et désactivé sur le même type de nœud et dans la même zone. La limite à une tâche STAR et le jeu pilote de 50 000 paires ne qualifient pas un lot de 300–400 échantillons. En particulier, scratch ne supprime pas les lectures d'index observées sur SFS par `STAR_ALIGN`.
 
 Le scratch est local au nœud. Une interruption peut y laisser des fichiers temporaires; le remplacement du nœud les perd. Ils ne font pas partie du cache reprenable : garder le workdir sur SFS et reprendre avec le même `RUN_ID` et le même profil. Mesurer séparément les lectures SFS, les écritures scratch, les transferts stage-in/stage-out et la durée STAR; les compteurs `rchar`/`wchar` de Nextflow ne distinguent pas les montages. Ne conclure qu'après fin du Job, validation des artefacts et mesure de la reprise.
+
+### Mesure de `STAR_GENOMEGENERATE` sur GEN3 — 26 septembre 2026 (UTC)
+
+| Étape / métrique | Résultat observé |
+|---|---|
+| Entrée | Début de tâche à 08:08:29; environ 4,3 GiB de FASTA/GTF copiés sur scratch avant le calcul (durée de copie non isolée). |
+| Tâche Nextflow | Durée 1 h 08 min 27 s; `realtime` 36 min 40 s; CPU 447,1 %; RSS maximale 51,5 GB. |
+| STAR | Calcul interne terminé à 08:54:16. |
+| Sortie | Index de 29,8 GB recopié vers SFS; fin vers 09:16:56, soit environ 22 min 40 s à ~22 MB/s. |
+| Même tâche sur POP2/SFS | Durée Nextflow 2 h 39 min 57 s; `realtime` 2 h 39 min 55 s. |
+
+La durée de tâche GEN3 est 2,34× plus courte; le `realtime` rapporté est environ 4,36× plus court. Cette comparaison n'isole pas l'effet du scratch : type de nœud et zone diffèrent. `STAR_ALIGN` est encore en cours; ces mesures ne valident pas le run GEN3 complet.
 
 ## Qualification de 300–400 échantillons
 

@@ -129,7 +129,7 @@ make smoke-test RUN_ID=validation-20260925 RESUME=1
 
 Le run humain a validé le parcours e2e sur un PVC workdir SFS de 200 Go et une référence de 50 Go : le Job s'est terminé et `make validate-run` a vérifié les artefacts. Le chargement STAR a observé environ 22 MB/s sur SFS; aucune comparaison contrôlée entre les PVC de 100 et 200 Go ne permet d'attribuer un gain à l'agrandissement. Cette validation confirme le fonctionnement technique, pas la validité biologique. Les pools et PVC restent dimensionnés pour le pilote; les volumes de 300–400 échantillons ou 2,2 To, la reprise après panne, les coûts et la restauration ne sont pas qualifiés.
 
-Le profil opt-in `gen3_scratch_benchmark` place les étapes STAR sur `gen3-probe` en `fr-par-2` avec `/scratch`; les autres tâches, dont RSEM, restent sur `star-compute` en `fr-par-3`. Le benchmark est en cours; aucune mesure de performance n'est encore publiée.
+Le profil opt-in `gen3_scratch_benchmark` place les étapes STAR sur `gen3-probe` en `fr-par-2` avec `/scratch`; les autres tâches, dont RSEM, restent sur `star-compute` en `fr-par-3`. `STAR_GENOMEGENERATE` a duré 1 h 08 min 27 s sur GEN3 contre 2 h 39 min 57 s sur POP2/SFS, mais le type de nœud et la zone diffèrent. `STAR_ALIGN` est en cours; le run GEN3 complet n'est pas encore validé. Les mesures figurent dans [Préparation production](docs/PRODUCTION-READINESS.md).
 
 Avant toute production, faire un benchmark représentatif STAR, dimensionner SFS/autoscaling, tester reprise et restauration, définir rétention/observabilité, et faire valider les métriques QC. Les permissions IAM objet sont à l'échelle du projet : séparer aussi le backend Terraform dans un projet isolé ou protéger explicitement les autres buckets.
 
@@ -153,3 +153,12 @@ Voir [Préparation production](docs/PRODUCTION-READINESS.md) pour le périmètre
 | 19:28:59 | Pool de calcul | Le second nœud `star-compute` est `Ready`. | star-compute |
 | 19:38:41 | Job Nextflow | Job terminé (`Complete`). | star-compute |
 | ≈19:43 | `make validate-run` | Validation passée : BAM de 7 864 439 octets, 10 052 transcrits quantifiés, 13 gènes avec des comptes non nuls et rapport MultiQC présent. | — (commande locale) |
+
+## Essai GEN3 — 26 septembre 2026 (UTC)
+
+| Timestamp UTC | Étape | Résultat observé | Pool / lieu |
+|---|---|---|---|
+| 08:08:29 | `STAR_GENOMEGENERATE` | Début de tâche; ~4,3 GiB de FASTA/GTF copiés sur scratch avant le calcul (durée de copie non isolée). | gen3-probe |
+| 08:54:16 | Calcul STAR | Calcul interne terminé. | gen3-probe |
+| ≈09:16:56 | Fin de tâche et copie de l'index | 29,8 GB recopiés vers SFS en ~22 min 40 s (~22 MB/s). Durée Nextflow 1 h 08 min 27 s, `realtime` 36 min 40 s, CPU 447,1 %, RSS maximale 51,5 GB. | gen3-probe → SFS |
+| En cours | `STAR_ALIGN` | Run GEN3 complet non terminé et non validé. | gen3-probe |
