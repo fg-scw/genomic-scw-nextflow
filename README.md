@@ -13,7 +13,7 @@ flowchart LR
       subgraph AZ3["fr-par-3"]
         REF["Bootstrap · orchestrator<br/>POP2-4C-16G"]
         HEAD["Head Nextflow<br/>star-compute · POP2-HM-8C-64G"]
-        TASKS["Pods nf-core par défaut<br/>STAR et RSEM sur POP2"]
+        TASKS["Pods nf-core par défaut<br/>sur POP2"]
       end
       subgraph AZ2["fr-par-2 · profil STAR opt-in"]
         GEN3["Nœud gen3-probe<br/>MEMORY3-X8C-64G<br/>scw-create-scratch-volume"]
@@ -46,6 +46,8 @@ flowchart LR
   HEAD -->|"publishDir depuis le workdir SFS"| RESULTS
   GEN3 --> BLOCK
 ```
+
+Le tag `scw-create-scratch-volume` est posé sur les trois pools Terraform; il ne fournit un volume utilisable que sur les nouveaux nœuds compatibles créés avec ce tag. La présence d'un scratch sur les POP2 déjà provisionnés n'est pas garantie.
 
 ## Workflow
 
@@ -137,9 +139,9 @@ Avant de soumettre le Job, le script vérifie `/scratch` avec un préflight `hos
 
 ## POC et production
 
-Le run humain a validé le parcours e2e sur un PVC workdir SFS de 200 Go et une référence de 50 Go : le Job s'est terminé et `make validate-run` a vérifié les artefacts. Le chargement STAR a observé environ 22 MB/s sur SFS; aucune comparaison contrôlée entre les PVC de 100 et 200 Go ne permet d'attribuer un gain à l'agrandissement. Cette validation confirme le fonctionnement technique, pas la validité biologique. Les pools et PVC restent dimensionnés pour le pilote; les volumes de 300–400 échantillons ou 2,2 To, la reprise après panne, les coûts et la restauration ne sont pas qualifiés.
+Le dépôt vise la faisabilité et la stabilité d'un POC sur un petit jeu, pas l'exécution d'un lot de 300–400 échantillons ou 2,2 To; cette échelle relève d'une qualification production séparée. Le pilote a validé le parcours technique sur un PVC workdir SFS de 200 Go et une référence de 50 Go; cela ne valide pas la biologie. Le chargement STAR a observé environ 22 MB/s sur SFS, sans comparaison contrôlée entre les PVC de 100 et 200 Go. La restauration, les coûts et la reprise au-delà du cas testé ne sont pas qualifiés.
 
-Le profil opt-in `gen3_scratch_benchmark` place les étapes STAR sur `gen3-probe` en `fr-par-2` avec `/scratch`; les autres tâches, dont RSEM, restent sur `star-compute` en `fr-par-3`. Le Job GEN3 s'est terminé à 09:52:48 UTC et `make validate-run RUN_ID=gen3-scratch-20260926` a passé les contrôles techniques. Le BAM et featureCounts ont même taille et ETag que le baseline POP2; Salmon a 10 036 lignes de quantification non nulles contre 10 052, malgré 252 894 transcrits et 45 676 reads mappés dans les deux runs. La reproductibilité biologique reste à examiner. Ce pilote ne qualifie pas la production. Les mesures figurent dans [Préparation production](docs/PRODUCTION-READINESS.md).
+Le profil opt-in `gen3_scratch_benchmark` place les étapes STAR sur `gen3-probe` en `fr-par-2` avec `/scratch`; les autres tâches restent sur `star-compute` en `fr-par-3`. Le Job GEN3 s'est terminé à 09:52:48 UTC et `make validate-run RUN_ID=gen3-scratch-20260926` a passé les contrôles techniques. Le BAM et featureCounts ont même taille et ETag que le baseline POP2; Salmon a 10 036 lignes de quantification non nulles contre 10 052, malgré 252 894 transcrits et 45 676 reads mappés dans les deux runs. La reproductibilité biologique reste à examiner. Ce pilote ne qualifie pas la production. Les mesures figurent dans [Préparation production](docs/PRODUCTION-READINESS.md).
 
 Avant toute production, faire un benchmark représentatif STAR, dimensionner SFS/autoscaling, tester reprise et restauration, définir rétention/observabilité, et faire valider les métriques QC. Les permissions IAM objet sont à l'échelle du projet : séparer aussi le backend Terraform dans un projet isolé ou protéger explicitement les autres buckets.
 
