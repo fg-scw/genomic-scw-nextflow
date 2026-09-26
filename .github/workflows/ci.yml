@@ -42,3 +42,11 @@ jobs:
           for script in scripts/*.sh; do
             bash -n "$script"
           done
+
+      - name: Run shell tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test in tests/run-pipeline-*.sh; do
+            bash "$test"
+          done
