@@ -100,7 +100,7 @@ SH
           requests: {cpu: "10m", memory: "16Mi"},
           limits: {cpu: "100m", memory: "128Mi"}
         } |
-        .spec.template.spec.volumeMounts = [{name: "scratch", mountPath: "/scratch"}] |
+        .spec.template.spec.containers[0].volumeMounts = [{name: "scratch", mountPath: "/scratch"}] |
         .spec.template.spec.volumes = [{name: "scratch", hostPath: {path: "/scratch", type: "Directory"}}] |
         .spec.activeDeadlineSeconds = 180
       ' \
