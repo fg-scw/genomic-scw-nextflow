@@ -1,0 +1,118 @@
+locals {
+  bucket_names = {
+    input   = "${var.cluster_name}-input-${substr(var.scw_project_id, 0, 8)}"
+    results = "${var.cluster_name}-results-${substr(var.scw_project_id, 0, 8)}"
+  }
+}
+
+resource "scaleway_object_bucket" "data" {
+  for_each = local.bucket_names
+
+  name          = each.value
+  region        = var.scaleway_region
+  project_id    = var.scw_project_id
+  force_destroy = false
+  tags = {
+    project = var.cluster_name
+    purpose = each.key
+  }
+
+  # Terraform refuses to delete a non-empty bucket. Operators must back up or
+  # explicitly empty its objects and versions before destroying the bucket.
+  # Versioning retains prior versions; lifecycle rules only clean old versions
+  # and incomplete multipart uploads.
+  versioning {
+    enabled = true
+  }
+
+  lifecycle_rule {
+    id                                     = "expire-noncurrent-versions"
+    enabled                                = true
+    abort_incomplete_multipart_upload_days = 7
+
+    noncurrent_version_expiration {
+      noncurrent_days = var.noncurrent_version_retention_days
+    }
+  }
+}
+
+resource "scaleway_object_bucket_policy" "input_read" {
+  bucket     = scaleway_object_bucket.data["input"].name
+  project_id = var.scw_project_id
+
+  policy = jsonencode({
+    Version = "2023-04-17"
+    Id      = "${var.cluster_name}-input-read"
+    Statement = [
+      {
+        Sid       = "PipelineReadInput"
+        Effect    = "Allow"
+        Principal = { SCW = "application_id:${scaleway_iam_application.pipeline.id}" }
+        Action    = ["s3:ListBucket", "s3:GetObject"]
+        Resource  = [scaleway_object_bucket.data["input"].name, "${scaleway_object_bucket.data["input"].name}/*"]
+      },
+      {
+        Sid       = "PipelineUploadValidationInputs"
+        Effect    = "Allow"
+        Principal = { SCW = "application_id:${scaleway_iam_application.pipeline.id}" }
+        Action    = ["s3:PutObject"]
+        Resource  = ["${scaleway_object_bucket.data["input"].name}/validation/*"]
+      },
+      {
+        Sid       = "TerraformOperatorBucketMetadataRead"
+        Effect    = "Allow"
+        Principal = { SCW = "user_id:${var.operator_user_id}" }
+        Action = [
+          "s3:GetBucketAcl",
+          "s3:GetBucketObjectLockConfiguration",
+          "s3:ListBucket",
+          "s3:GetBucketTagging",
+          "s3:GetBucketCORS",
+          "s3:GetBucketVersioning",
+          "s3:GetLifecycleConfiguration",
+        ]
+        Resource = [scaleway_object_bucket.data["input"].name]
+      },
+    ]
+  })
+}
+
+resource "scaleway_object_bucket_policy" "results_rw" {
+  bucket     = scaleway_object_bucket.data["results"].name
+  project_id = var.scw_project_id
+
+  policy = jsonencode({
+    Version = "2023-04-17"
+    Id      = "${var.cluster_name}-results-rw"
+    Statement = [
+      {
+        Sid       = "PipelineReadWriteResults"
+        Effect    = "Allow"
+        Principal = { SCW = "application_id:${scaleway_iam_application.pipeline.id}" }
+        Action = [
+          "s3:ListBucket",
+          "s3:ListBucketMultipartUploads",
+          "s3:ListMultipartUploadParts",
+          "s3:GetObject",
+          "s3:PutObject",
+        ]
+        Resource = [scaleway_object_bucket.data["results"].name, "${scaleway_object_bucket.data["results"].name}/*"]
+      },
+      {
+        Sid       = "TerraformOperatorBucketMetadataRead"
+        Effect    = "Allow"
+        Principal = { SCW = "user_id:${var.operator_user_id}" }
+        Action = [
+          "s3:GetBucketAcl",
+          "s3:GetBucketObjectLockConfiguration",
+          "s3:ListBucket",
+          "s3:GetBucketTagging",
+          "s3:GetBucketCORS",
+          "s3:GetBucketVersioning",
+          "s3:GetLifecycleConfiguration",
+        ]
+        Resource = [scaleway_object_bucket.data["results"].name]
+      },
+    ]
+  })
+}
