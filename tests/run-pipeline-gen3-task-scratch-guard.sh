@@ -17,32 +17,26 @@ sed -e "s|/proc/mounts|${tmp}/mounts|" -e "s|/scratch|${tmp}/scratch|g" \
 bash -n "$tmp/guard-test.sh"
 
 mkdir "$tmp/bin"
-cat > "$tmp/bin/stat" <<'SH'
-#!/bin/sh
-case "$3" in
-  "${SCRATCH_PATH:-/scratch}") printf '%s\n' "${SCRATCH_DEVICE:-10}" ;;
-  /) printf '%s\n' "${ROOT_DEVICE:-1}" ;;
-  *) exit 2 ;;
-esac
-SH
 cat > "$tmp/bin/df" <<'SH'
 #!/bin/sh
 printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
 printf '/dev/sdb 100000000 1 %s 1%% /scratch\n' "${SCRATCH_KIB:-70000000}"
 SH
-chmod +x "$tmp/bin/stat" "$tmp/bin/df"
-printf '/dev/sdb %s ext4 rw 0 0\n' "$tmp/scratch" > "$tmp/mounts"
+chmod +x "$tmp/bin/df"
+printf '/dev/root / ext4 ro 0 0\n/dev/sdb %s ext4 rw 0 0\n' "$tmp/scratch" > "$tmp/mounts"
 
-PATH="$tmp/bin:$PATH" SCRATCH_PATH="$tmp/scratch" bash "$tmp/guard-test.sh" > "$tmp/output"
-grep -Fq 'Verified scratch mount: source=/dev/sdb filesystem=ext4' "$tmp/output"
+PATH="$tmp/bin:$PATH" bash "$tmp/guard-test.sh" > "$tmp/output"
+grep -Fq 'Verified scratch mount: source=/dev/sdb filesystem=ext4 root-source=/dev/root' "$tmp/output"
 
-if PATH="$tmp/bin:$PATH" SCRATCH_PATH="$tmp/scratch" SCRATCH_DEVICE=1 bash "$tmp/guard-test.sh" > "$tmp/output" 2>&1; then
-  echo 'Scratch guard accepted /scratch on the root filesystem.' >&2
+printf '/dev/sdb / ext4 ro 0 0\n/dev/sdb %s ext4 rw 0 0\n' "$tmp/scratch" > "$tmp/mounts"
+if PATH="$tmp/bin:$PATH" bash "$tmp/guard-test.sh" > "$tmp/output" 2>&1; then
+  echo 'Scratch guard accepted /scratch with the root mount source.' >&2
   exit 1
 fi
-grep -Fq 'not a separate scratch volume' "$tmp/output"
+grep -Fq 'shares its filesystem source with root' "$tmp/output"
 
-if PATH="$tmp/bin:$PATH" SCRATCH_PATH="$tmp/scratch" SCRATCH_KIB=62914559 bash "$tmp/guard-test.sh" > "$tmp/output" 2>&1; then
+printf '/dev/root / ext4 ro 0 0\n/dev/sdb %s ext4 rw 0 0\n' "$tmp/scratch" > "$tmp/mounts"
+if PATH="$tmp/bin:$PATH" SCRATCH_KIB=62914559 bash "$tmp/guard-test.sh" > "$tmp/output" 2>&1; then
   echo 'Scratch guard accepted less than 60 GiB free.' >&2
   exit 1
 fi
