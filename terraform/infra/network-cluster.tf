@@ -64,7 +64,7 @@ resource "scaleway_k8s_pool" "orchestrator" {
   autohealing = true
   region      = var.scaleway_region
   zone        = var.scaleway_zone
-  tags        = concat(var.tags, ["role=orchestrator"])
+  tags        = concat(var.tags, ["role=orchestrator", "scw-create-scratch-volume"])
 
   upgrade_policy {
     max_unavailable = 1
@@ -88,7 +88,7 @@ resource "scaleway_k8s_pool" "compute" {
   autohealing = true
   region      = var.scaleway_region
   zone        = var.scaleway_zone
-  tags        = concat(var.tags, ["role=star-compute"])
+  tags        = concat(var.tags, ["role=star-compute", "scw-create-scratch-volume"])
 
   taints {
     key    = "workload"
