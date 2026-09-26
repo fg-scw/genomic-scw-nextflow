@@ -135,13 +135,13 @@ bash scripts/run-pipeline.sh gen3-scratch-repeat --gen3-scratch-benchmark -- --s
 make validate-run RUN_ID=gen3-scratch-repeat
 ```
 
-Avant de soumettre le Job, le script vérifie `/scratch` avec un préflight `hostPath.type: Directory` : montage ext4 séparé et inscriptible. Le garde `/proc/mounts` + `df` dans chaque pod STAR s'appliquera aux prochains runs; il n'était pas inclus dans le ConfigMap du retry en cours. Pour reprendre un run, ajouter `--resume` avant `--` à la commande du script.
+Avant de soumettre le Job, le script vérifie `/scratch` avec un préflight `hostPath.type: Directory` : montage ext4 séparé et inscriptible. Le garde `/proc/mounts` + `df` dans chaque pod STAR s'appliquera aux prochains runs; il n'était pas inclus dans le ConfigMap du retry documenté ci-dessous. Pour reprendre un run, ajouter `--resume` avant `--` à la commande du script.
 
 ## POC et production
 
 Le dépôt vise la faisabilité et la stabilité d'un POC sur un petit jeu, pas l'exécution d'un lot de 300–400 échantillons ou 2,2 To; cette échelle relève d'une qualification production séparée. Le pilote a validé le parcours technique sur un PVC workdir SFS de 200 Go et une référence de 50 Go; cela ne valide pas la biologie. Le chargement STAR a observé environ 22 MB/s sur SFS, sans comparaison contrôlée entre les PVC de 100 et 200 Go. Après le SHA initial, le bootstrap conserve les tailles de FASTA/GTF et les compare aux reprises; les anciens manifestes sont vérifiés une fois par SHA avant migration. Un exercice de restauration d'un fichier de 1 MiB depuis SFS et S3 a rendu le même SHA-256 (`634fbf86…dbf`); les données de test ont été nettoyées, mais une restauration complète n'est pas qualifiée.
 
-Le profil opt-in `gen3_scratch_benchmark` place les étapes STAR sur `gen3-probe` en `fr-par-2`; les autres tâches restent sur `star-compute` en `fr-par-3`. Le premier Job GEN3 a terminé à 09:52:48 UTC et passé les contrôles techniques. Les FASTQ et BAM comparés ont des SHA-256 identiques; les quantifications Salmon ont 10 036 lignes non nulles contre 10 052, avec TPM Pearson 0,99905 et variation totale 0,923 %. L'inférence Salmon est une cause probable, non démontrée; aucun seuil QC biologique précis n'est défini. Un nouveau run de reprise après remplacement de nœud est en cours et n'est pas encore validé. Les détails figurent dans [Préparation production](docs/PRODUCTION-READINESS.md).
+Le profil opt-in `gen3_scratch_benchmark` place les étapes STAR sur `gen3-probe` en `fr-par-2`; les autres tâches restent sur `star-compute` en `fr-par-3`. Les runs POP2 et GEN3 ont passé les contrôles techniques; les FASTQ et BAM comparés ont des SHA-256 identiques. Les comptes Salmon non nuls sont 10 052 (POP2), 10 036 (GEN3 initial) et 10 040 (reprise). L'inférence Salmon est une cause probable des écarts, non démontrée; aucun seuil QC biologique précis n'est défini. Le retry `gen3-recovery-20260926` a terminé et passé `make validate-run` à 11:50:16 UTC après remplacement du nœud; quatre BAM et featureCounts sont identiques au run GEN3 précédent. Les détails figurent dans [Préparation production](docs/PRODUCTION-READINESS.md).
 
 Avant toute production, faire un benchmark représentatif STAR, dimensionner SFS/autoscaling, tester reprise et restauration, définir rétention/observabilité, et faire valider les métriques QC. Les permissions IAM objet sont à l'échelle du projet : séparer aussi le backend Terraform dans un projet isolé ou protéger explicitement les autres buckets.
 
@@ -182,4 +182,6 @@ Voir [Préparation production](docs/PRODUCTION-READINESS.md) pour le périmètre
 
 | Timestamp UTC | Étape | Résultat observé | Pool / lieu |
 |---|---|---|---|
-| 11:12:46 | Remplacement de nœud pendant STAR | Le run `gen3-recovery-20260926` a été automatiquement repris avec le même `RUN_ID` sur `bbfe88`; une vérification manuelle dans le pod a trouvé `root=overlay` et `/scratch=/dev/sdb ext4` (~145,6 GiB). Le Job reste en cours, sans validation finale. | gen3-probe |
+| 11:12:46 | Remplacement de nœud pendant STAR | Le run `gen3-recovery-20260926` a été automatiquement repris avec le même `RUN_ID` sur `bbfe88`; une vérification manuelle dans le pod a trouvé `root=overlay` et `/scratch=/dev/sdb ext4` (~145,6 GiB). | gen3-probe |
+| 11:50:16 | Job Nextflow de reprise | Terminé avec succès; le nouveau garde `/proc/mounts` + `df` n'était pas dans son ConfigMap. | gen3-probe |
+| Après 11:50:16 | `make validate-run` | Passé : 49 539 paires après trimming, 94,06 % mappés de façon unique, BAM 7 864 439 octets, 10 040 transcrits Salmon non nuls, 13 gènes featureCounts non nuls et MultiQC présent. Quatre BAM et featureCounts sont identiques octet par octet au premier run GEN3. | — (commande locale) |
