@@ -70,6 +70,7 @@ require_kubernetes_platform
 verify_gen3_scratch_mount() {
   local check_job="gen3-scratch-check-${RUN_ID}"
   local check_cmd
+  # Allow Kapsule autoscaling to bring the Gen3 node Ready from zero.
   check_cmd="$(cat <<'SH'
 set -eu
 scratch_dev="$(stat -c %d /scratch)"
@@ -102,11 +103,11 @@ SH
         } |
         .spec.template.spec.containers[0].volumeMounts = [{name: "scratch", mountPath: "/scratch"}] |
         .spec.template.spec.volumes = [{name: "scratch", hostPath: {path: "/scratch", type: "Directory"}}] |
-        .spec.activeDeadlineSeconds = 180
+        .spec.activeDeadlineSeconds = 600
       ' \
     | kubectl apply -f - >/dev/null
 
-  if ! kubectl wait --for=condition=complete "job/${check_job}" -n "$NS" --timeout=180s; then
+  if ! kubectl wait --for=condition=complete "job/${check_job}" -n "$NS" --timeout=600s; then
     kubectl logs -n "$NS" "job/${check_job}" >&2 || true
     kubectl describe job "$check_job" -n "$NS" >&2 || true
     fail "gen3-probe /scratch preflight failed; pipeline Job was not submitted."
