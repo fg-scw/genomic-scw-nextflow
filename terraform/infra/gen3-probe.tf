@@ -13,7 +13,7 @@ resource "scaleway_k8s_pool" "gen3_probe" {
   region           = var.scaleway_region
   zone             = "fr-par-2"
   root_volume_type = "sbs_5k"
-  tags             = concat(var.tags, ["role=gen3-probe"])
+  tags             = concat(var.tags, ["role=gen3-probe", "scw-create-scratch-volume"])
 
   taints {
     key    = "workload"
