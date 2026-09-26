@@ -8,17 +8,19 @@ locals {
 resource "scaleway_object_bucket" "data" {
   for_each = local.bucket_names
 
-  name       = each.value
-  region     = var.scaleway_region
-  project_id = var.scw_project_id
+  name          = each.value
+  region        = var.scaleway_region
+  project_id    = var.scw_project_id
+  force_destroy = false
   tags = {
     project = var.cluster_name
     purpose = each.key
   }
 
-  # Never delete FASTQ or analysis results as a side effect of terraform destroy.
-  # Versioning allows recovery; only old noncurrent versions and abandoned
-  # multipart uploads are cleaned automatically.
+  # Terraform refuses to delete a non-empty bucket. Operators must back up or
+  # explicitly empty its objects and versions before destroying the bucket.
+  # Versioning retains prior versions; lifecycle rules only clean old versions
+  # and incomplete multipart uploads.
   versioning {
     enabled = true
   }
