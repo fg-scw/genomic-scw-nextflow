@@ -47,6 +47,31 @@ Les buckets de données ont le versioning activé. Les versions courantes ne son
 
 ## État distant
 
-Les deux racines Terraform ont des clés distinctes et utilisent `use_lockfile=true`. Ne pas supprimer manuellement `.tflock` ni lancer `force-unlock` avant d'avoir confirmé que le détenteur est terminé. Les permissions du backend sont au niveau projet Scaleway; protéger l'ensemble du projet, pas uniquement le bucket de state.
+### Travail à plusieurs
 
-Pour une restauration, geler les opérations Terraform, conserver une copie du state courant, restaurer une version vérifiée du state et faire un `plan` avant tout `apply`.
+Chaque contributeur copie les exemples en fichiers locaux, puis renseigne le même bucket, la même région et le même endpoint. Gardez les mêmes chemins S3 de state entre contributeurs, mais un chemin distinct par racine (`infra.tfstate` et `kubernetes.tfstate`); conservez `use_lockfile=true` dans les deux fichiers.
+
+```bash
+cp terraform/infra/backend.hcl.example terraform/infra/backend.hcl
+cp terraform/kubernetes/backend.hcl.example terraform/kubernetes/backend.hcl
+```
+
+Un administrateur du projet d'état crée une fois le bucket privé et versionné :
+
+```bash
+scw object bucket create NOM_BUCKET_ETAT enable-versioning=true acl=private project-id=UUID_PROJET_ETAT region=fr-par
+```
+
+Chaque opérateur utilise sa propre identité et ses propres clés Scaleway; ne partagez pas une clé personnelle. L'identité du backend doit pouvoir lister le bucket, lire et écrire le state, ainsi que lire, créer et supprimer le fichier `.tflock` (`ObjectStorageObjectsRead`, `ObjectStorageObjectsWrite`, `ObjectStorageObjectsDelete`). Scaleway accorde ces permissions Object Storage au niveau projet : gardez le projet d'état distinct du projet de déploiement (`scw_project_id`) et limitez les accès à chacun. Pour l'accès S3, configurez le projet d'état comme projet préféré de la clé API.
+
+Si deux opérateurs travaillent sur la même racine, le second reçoit une erreur de verrou pendant l'opération du premier; `-lock-timeout=5m` permet d'attendre. Les verrous `infra` et `kubernetes` sont distincts, mais Kubernetes dépend de l'infrastructure. Le verrou ne protège pas la période entre un plan et son apply : coordonnez cette séquence et relancez le plan si quelqu'un a appliqué un changement depuis. Pour un verrou abandonné, vérifiez d'abord que le processus Terraform est terminé et récupérez son ID dans le message d'erreur, puis lancez la commande dans la racine concernée :
+
+```bash
+terraform -chdir=terraform/infra force-unlock LOCK_ID
+```
+
+Remplacez `infra` par `kubernetes` pour l'autre state. Ne supprimez jamais `.tflock` à la main. Sur le bucket pilote, un second `plan` lancé pendant un `apply` temporaire a été refusé par le verrou S3 le 29 septembre 2026; il a réussi après la fin de l'`apply`. Ce test valide la concurrence entre deux processus, pas les droits de deux identités distinctes. Le state, ses versions antérieures et les fichiers de plan peuvent contenir des secrets, dont la clé IAM du pipeline : ne les commitez ni ne les partagez, et restreignez leur lecture.
+
+Les exemples activent `encrypt=true`. Le bucket pilote en `fr-par` a accepté un PUT temporaire avec `AES256` et les plans Terraform avec verrou le 29 septembre 2026. La [documentation Scaleway](https://www.scaleway.com/en/docs/object-storage/troubleshooting/400-error-aes256/) indique pourtant que cet en-tête peut être rejeté. Vérifiez l'écriture et le verrouillage lors de la création d'un autre backend; ne supposez pas ce comportement identique dans toute région.
+
+Pour une restauration, geler les opérations Terraform, conserver une copie du state courant, restaurer une version vérifiée du state et faire un `plan` avant tout `apply`. Références : [backend S3 et verrouillage Terraform](https://developer.hashicorp.com/terraform/language/backend/s3), [données sensibles et state Terraform](https://developer.hashicorp.com/terraform/language/manage-sensitive-data), [portée projet des droits Object Storage](https://www.scaleway.com/en/docs/object-storage/api-cli/combining-iam-and-object-storage/) et [permissions S3 Scaleway](https://www.scaleway.com/en/docs/object-storage/reference-content/s3-iam-permissions-equivalence/).

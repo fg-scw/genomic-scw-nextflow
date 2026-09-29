@@ -1,5 +1,5 @@
 variable "scw_project_id" {
-  description = "Scaleway Project UUID. Credentials come from SCW_ACCESS_KEY and SCW_SECRET_KEY."
+  description = "Scaleway Project UUID. Credentials come from the active Scaleway profile or SCW environment variables."
   type        = string
 
   validation {
