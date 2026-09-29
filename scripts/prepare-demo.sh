@@ -4,16 +4,21 @@ source "$(cd "$(dirname "$0")" && pwd)/common.sh"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/prepare-demo.sh <run-id>
+Usage: scripts/prepare-demo.sh <run-id> [sample-count]
 
 Downloads SRR1039508 (human airway smooth-muscle RNA-seq), keeps the first
 50,000 paired reads from each FASTQ, and uploads immutable run-scoped inputs.
+With sample-count > 1, repeats the reads under distinct sample names to create
+a scheduling/load test; this is not synthetic biological data.
 USAGE
 }
 
-[[ $# -eq 1 ]] || { usage >&2; exit 2; }
+[[ $# -ge 1 && $# -le 2 ]] || { usage >&2; exit 2; }
 RUN_ID="$1"
+SAMPLE_COUNT="${2:-1}"
 validate_run_id "$RUN_ID"
+[[ "$SAMPLE_COUNT" =~ ^[1-9][0-9]*$ ]] && (( SAMPLE_COUNT <= 100 )) \
+  || fail "Sample count must be an integer between 1 and 100."
 require_commands curl gzip awk wc aws terraform
 load_bucket_outputs
 load_pipeline_s3_credentials
@@ -111,8 +116,16 @@ done
 sample_sheet="${TMP_DIR}/samplesheet.csv"
 cat > "$sample_sheet" <<EOF_SAMPLES
 sample,fastq_1,fastq_2,strandedness
-SRR1039508,s3://${INPUT_BUCKET}/${INPUT_PREFIX}/SRR1039508_1.fastq.gz,s3://${INPUT_BUCKET}/${INPUT_PREFIX}/SRR1039508_2.fastq.gz,unstranded
 EOF_SAMPLES
+for ((sample=1; sample<=SAMPLE_COUNT; sample++)); do
+  if (( sample == 1 )); then
+    sample_name="SRR1039508"
+  else
+    printf -v sample_name 'load_%03d' "$sample"
+  fi
+  printf '%s,s3://%s/%s/SRR1039508_1.fastq.gz,s3://%s/%s/SRR1039508_2.fastq.gz,unstranded\n' \
+    "$sample_name" "$INPUT_BUCKET" "$INPUT_PREFIX" "$INPUT_BUCKET" "$INPUT_PREFIX" >> "$sample_sheet"
+done
 
 if command -v sha256sum >/dev/null 2>&1; then
   FASTQ1_SHA="$(sha256sum "${TMP_DIR}/SRR1039508_1.fastq.gz" | awk '{print $1}')"
@@ -124,7 +137,8 @@ else
 fi
 cat > "${TMP_DIR}/manifest.txt" <<EOF_MANIFEST
 run_id=${RUN_ID}
-sample=SRR1039508
+samples=$SAMPLE_COUNT
+sample_data=SRR1039508 reused for each sample (load test only)
 source=https://www.ebi.ac.uk/ena/browser/view/SRR1039508
 organism=Homo sapiens
 reference=GRCh38, Ensembl release 110
