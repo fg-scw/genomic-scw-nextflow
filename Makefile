@@ -11,12 +11,10 @@ RUN_ID ?=
 INPUT ?=
 OUTDIR ?=
 RESUME ?= 0
-AUTO_APPROVE ?= 0
 SAVE_ALIGN_INTERMEDS ?= false
 GEN3_SCRATCH_BENCHMARK ?= 0
 NF_ARGS ?=
 
-APPLY_FLAG := $(if $(filter 1 true,$(AUTO_APPROVE)),-auto-approve,)
 KUBECONFIG_ARG := -var="kubeconfig_path=$(KUBECONFIG)"
 export KUBECONFIG
 
@@ -61,7 +59,7 @@ infra-plan: infra-init
 	$(TF) -chdir=$(INFRA_DIR) plan -input=false -var-file=terraform.tfvars
 
 infra-apply: infra-init
-	$(TF) -chdir=$(INFRA_DIR) apply -input=false -var-file=terraform.tfvars $(APPLY_FLAG)
+	$(TF) -chdir=$(INFRA_DIR) apply -var-file=terraform.tfvars
 
 kubeconfig:
 	@mkdir -p "$$(dirname "$(KUBECONFIG)")"
@@ -77,16 +75,16 @@ platform-plan: platform-init
 	$(TF) -chdir=$(K8S_DIR) plan -input=false -var-file=terraform.tfvars $(KUBECONFIG_ARG)
 
 platform-apply: platform-init
-	$(TF) -chdir=$(K8S_DIR) apply -input=false -var-file=terraform.tfvars $(KUBECONFIG_ARG) $(APPLY_FLAG)
+	$(TF) -chdir=$(K8S_DIR) apply -var-file=terraform.tfvars $(KUBECONFIG_ARG)
 
 sync-secret:
 	bash $(SCRIPTS_DIR)/sync-k8s-secret.sh
 
 cluster:
 	$(MAKE) bootstrap-state STATE_BUCKET=$(STATE_BUCKET) STATE_PROJECT_ID=$(STATE_PROJECT_ID) STATE_REGION=$(STATE_REGION)
-	$(MAKE) infra-apply AUTO_APPROVE=$(AUTO_APPROVE)
+	$(MAKE) infra-apply
 	$(MAKE) kubeconfig
-	$(MAKE) platform-apply AUTO_APPROVE=$(AUTO_APPROVE)
+	$(MAKE) platform-apply
 	$(MAKE) sync-secret
 
 plan: ## Review the infrastructure plan
@@ -120,7 +118,7 @@ run-pipeline:
 	bash $(SCRIPTS_DIR)/run-pipeline.sh "$(RUN_ID)" $(if $(INPUT),--input "$(INPUT)",) $(if $(OUTDIR),--outdir "$(OUTDIR)",) $(if $(filter 1 true,$(GEN3_SCRATCH_BENCHMARK)),--gen3-scratch-benchmark,) $(if $(filter 1 true,$(RESUME)),--resume,) -- --save_align_intermeds $(SAVE_ALIGN_INTERMEDS) $(NF_ARGS)
 
 deploy: ## Create the cluster and install the Nextflow platform
-	$(MAKE) cluster STATE_BUCKET="$(STATE_BUCKET)" STATE_PROJECT_ID="$(STATE_PROJECT_ID)" STATE_REGION="$(STATE_REGION)" AUTO_APPROVE="$(AUTO_APPROVE)"
+	$(MAKE) cluster STATE_BUCKET="$(STATE_BUCKET)" STATE_PROJECT_ID="$(STATE_PROJECT_ID)" STATE_REGION="$(STATE_REGION)"
 
 run: ## Run a synthetic or real samplesheet already stored in Object Storage
 	@test -n "$(RUN_ID)" || { echo 'Set RUN_ID to a unique run name.'; exit 2; }
@@ -129,5 +127,5 @@ run: ## Run a synthetic or real samplesheet already stored in Object Storage
 	$(MAKE) run-pipeline RUN_ID="$(RUN_ID)" INPUT="$(INPUT)" OUTDIR="$(OUTDIR)" RESUME="$(RESUME)" SAVE_ALIGN_INTERMEDS="$(SAVE_ALIGN_INTERMEDS)" GEN3_SCRATCH_BENCHMARK="$(GEN3_SCRATCH_BENCHMARK)" NF_ARGS="$(NF_ARGS)"
 
 destroy: ## Destroy Kubernetes and Scaleway resources (interactive)
-	$(TF) -chdir=$(K8S_DIR) destroy -input=false -var-file=terraform.tfvars $(KUBECONFIG_ARG)
-	$(TF) -chdir=$(INFRA_DIR) destroy -input=false -var-file=terraform.tfvars
+	$(TF) -chdir=$(K8S_DIR) destroy -var-file=terraform.tfvars $(KUBECONFIG_ARG)
+	$(TF) -chdir=$(INFRA_DIR) destroy -var-file=terraform.tfvars

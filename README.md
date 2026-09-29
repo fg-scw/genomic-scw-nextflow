@@ -71,7 +71,7 @@ make plan
 make deploy STATE_BUCKET=mon-bucket-etat STATE_PROJECT_ID=project-uuid
 ```
 
-Le déploiement crée les buckets, le réseau, Kapsule, les pools, SFS, l'identité de pipeline, le namespace, les PVC et le secret Kubernetes. Terraform demande confirmation. Pour automatiser après revue du plan : make deploy STATE_BUCKET=mon-bucket-etat STATE_PROJECT_ID=project-uuid AUTO_APPROVE=1.
+Le déploiement crée les buckets, le réseau, Kapsule, les pools, SFS, l'identité de pipeline, le namespace, les PVC et le secret Kubernetes. Terraform affiche et demande confirmation pour chacun des deux plans, infrastructure puis Kubernetes.
 
 ## Lancer un run synthétique, puis vos données
 
