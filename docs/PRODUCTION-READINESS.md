@@ -35,7 +35,7 @@ Ces mesures forment une seule série sur un seul échantillon, avec STAR en char
 - **Capacité production** : mesurer RAM/CPU STAR, débit et capacité SFS, autoscaling, durée et coût sur des échantillons pleine profondeur représentatifs. C'est une qualification distincte du POC.
 - **Reprise et restauration** : interrompre/reprendre un run sur le même workdir; tester la restauration SFS, des objets S3 et du state dans un environnement isolé.
 - **Données et QC** : définir rétention, chiffrement, droits d'accès, observabilité et alertes. Faire valider références, checksums, paramètres, métriques et rapports par le responsable bioinformatique.
-- **IAM** : Object Storage IAM Scaleway est à portée projet. Les identités pipeline ont lecture/écriture objet; la clé backend a bucket read, objet read/write/delete pour le state et `.tflock`. Placer seulement les ressources requises dans ce projet. Pour la production, isoler le backend dans un projet distinct ou ajouter des protections explicites sur les autres buckets.
+- **IAM** : Object Storage IAM Scaleway est à portée projet. Les identités pipeline ont lecture/écriture objet; la clé backend a bucket read, objet read/write/delete pour le state et `.tflock`. Le state infra contient la clé IAM du pipeline : limiter sa lecture, y compris sur les anciennes versions, et prévoir sa rotation si le state a été exposé. Placer seulement les ressources requises dans ce projet. Pour la production, isoler le backend dans un projet distinct ou ajouter des protections explicites sur les autres buckets.
 - **Cycle de vie** : confirmer versions Kubernetes, providers, images et pipeline supportées; prévoir maintenance et rollback.
 
 ## Scratch NVMe local

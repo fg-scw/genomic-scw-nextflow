@@ -2,7 +2,7 @@
 # Export SCW_ACCESS_KEY / SCW_SECRET_KEY and AWS_ACCESS_KEY_ID /
 # AWS_SECRET_ACCESS_KEY in your shell before Terraform commands.
 
-scw_project_id = "1d6906b8-42b0-4141-8752-28b7fcfccb95" # hcl-nextflow (SA-Demo)
+scw_project_id = "REPLACE_WITH_SCW_PROJECT_UUID"
 # Required: UUID of the Scaleway user allowed to read bucket metadata.
 operator_user_id = "REPLACE_WITH_SCW_USER_UUID"
 

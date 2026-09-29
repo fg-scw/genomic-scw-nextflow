@@ -54,7 +54,6 @@ spec:
               value: "__REFERENCE_VERIFY_ONLY__"
           args:
             - |
-              apk add --no-cache curl coreutils
               root=/data/reference/GRCh38
               ref="${root}/Ensembl-110"
               tmp="${root}/.Ensembl-110.tmp-$$"
@@ -78,6 +77,7 @@ spec:
                 exit 1
               fi
 
+              apk add --no-cache curl coreutils
               mkdir -p "$root" "$tmp"
               cd "$tmp"
               curl -fsSL --retry 5 --retry-all-errors -o fasta.CHECKSUMS "${fasta_base}/CHECKSUMS"

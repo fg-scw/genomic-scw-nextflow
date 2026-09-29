@@ -38,15 +38,30 @@ normalize_secret_id() {
   printf '%s' "$secret_id"
 }
 
-load_bucket_outputs() {
+load_infra_region() {
   [[ -d "$TF_INFRA" ]] || fail "Terraform infra directory is missing: ${TF_INFRA}"
-  INPUT_BUCKET="$(terraform -chdir="$TF_INFRA" output -raw input_bucket_name 2>/dev/null)" || fail "Terraform output input_bucket_name is unavailable; apply infra first."
-  RESULTS_BUCKET="$(terraform -chdir="$TF_INFRA" output -raw results_bucket_name 2>/dev/null)" || fail "Terraform output results_bucket_name is unavailable; apply infra first."
   INFRA_REGION="$(terraform -chdir="$TF_INFRA" output -raw region 2>/dev/null)" || fail "Terraform output region is unavailable; apply infra first."
   S3_REGION="${SCW_REGION:-$INFRA_REGION}"
-  S3_ENDPOINT="${SCW_S3_ENDPOINT:-https://s3.${S3_REGION}.scw.cloud}"
+  [[ -n "$S3_REGION" ]] || fail "Terraform returned an empty region."
+}
+
+load_bucket_outputs() {
+  load_infra_region
+  RESULTS_BUCKET="$(terraform -chdir="$TF_INFRA" output -raw results_bucket_name 2>/dev/null)" || fail "Terraform output results_bucket_name is unavailable; apply infra first."
   CLUSTER_ID="$(terraform -chdir="$TF_INFRA" output -raw cluster_id 2>/dev/null)" || fail "Terraform output cluster_id is unavailable; apply infra first."
-  [[ -n "$INPUT_BUCKET" && -n "$RESULTS_BUCKET" && -n "$CLUSTER_ID" && -n "$S3_REGION" && -n "$S3_ENDPOINT" ]] || fail "Terraform returned an empty required output."
+  S3_ENDPOINT="${SCW_S3_ENDPOINT:-https://s3.${S3_REGION}.scw.cloud}"
+  [[ -n "$RESULTS_BUCKET" && -n "$CLUSTER_ID" && -n "$S3_ENDPOINT" ]] || fail "Terraform returned an empty required output."
+}
+
+pipeline_credentials_payload() {
+  local secret_id revision
+  secret_id="$(terraform -chdir="$TF_INFRA" output -raw pipeline_credentials_secret_id 2>/dev/null)" \
+    || fail "Terraform output pipeline_credentials_secret_id is unavailable."
+  secret_id="$(normalize_secret_id "$secret_id")"
+  revision="$(terraform -chdir="$TF_INFRA" output -raw pipeline_credentials_revision 2>/dev/null)" \
+    || fail "Terraform output pipeline_credentials_revision is unavailable."
+  scw secret version access "$secret_id" revision="$revision" region="$S3_REGION" raw=true 2>/dev/null \
+    || fail "Could not read the pipeline S3 credentials from Scaleway Secret Manager."
 }
 
 load_pipeline_s3_credentials() {
@@ -58,14 +73,8 @@ load_pipeline_s3_credentials() {
   fi
 
   require_commands scw jq terraform
-  local secret_id revision payload
-  secret_id="$(terraform -chdir="$TF_INFRA" output -raw pipeline_credentials_secret_id 2>/dev/null)" \
-    || fail "Terraform output pipeline_credentials_secret_id is unavailable."
-  secret_id="$(normalize_secret_id "$secret_id")"
-  revision="$(terraform -chdir="$TF_INFRA" output -raw pipeline_credentials_revision 2>/dev/null)" \
-    || fail "Terraform output pipeline_credentials_revision is unavailable."
-  payload="$(scw secret version access "$secret_id" revision="$revision" region="$S3_REGION" raw=true 2>/dev/null)" \
-    || fail "Could not read the pipeline S3 credentials from Scaleway Secret Manager."
+  local payload
+  payload="$(pipeline_credentials_payload)"
   PIPELINE_S3_ACCESS_KEY="$(jq -er '.access_key | select(type == "string" and length > 0)' <<<"$payload")" \
     || fail "Secret Manager payload is missing access_key."
   PIPELINE_S3_SECRET_KEY="$(jq -er '.secret_key | select(type == "string" and length > 0)' <<<"$payload")" \

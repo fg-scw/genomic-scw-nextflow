@@ -5,7 +5,7 @@ SCRIPTS_DIR := scripts
 NAMESPACE ?= bioinformatics
 KUBECONFIG ?= $(HOME)/.kube/config-hcl-public-netflow
 STATE_BUCKET ?=
-STATE_PROJECT_ID ?= 1d6906b8-42b0-4141-8752-28b7fcfccb95
+STATE_PROJECT_ID ?=
 STATE_REGION ?= fr-par
 RUN_ID ?=
 INPUT ?=
@@ -35,7 +35,7 @@ init:
 bootstrap-state:
 	@test -n "$(STATE_BUCKET)" || { printf 'Set STATE_BUCKET to the dedicated Terraform state bucket name.\n' >&2; exit 2; }
 	@test -n "$(STATE_PROJECT_ID)" || { printf 'Set STATE_PROJECT_ID to the Scaleway project UUID for the state bucket.\n' >&2; exit 2; }
-	@printf '%s\n' "$(STATE_PROJECT_ID)" | grep -Eq '^[0-9a-fA-F-]{36}$$' || { printf 'STATE_PROJECT_ID must be a UUID.\n' >&2; exit 2; }
+	@printf '%s\n' "$(STATE_PROJECT_ID)" | grep -Eq '^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$$' || { printf 'STATE_PROJECT_ID must be a UUID.\n' >&2; exit 2; }
 	@if scw object bucket get "$(STATE_BUCKET)" project-id="$(STATE_PROJECT_ID)" region="$(STATE_REGION)" >/dev/null 2>&1; then \
 	  printf 'State bucket already exists: %s\n' "$(STATE_BUCKET)"; \
 	else \
@@ -117,14 +117,9 @@ bootstrap-reference:
 
 run-pipeline:
 	@test -n "$(RUN_ID)" || { echo 'Set RUN_ID to a unique run name.'; exit 2; }
-	@if [ "$(RESUME)" = 1 ]; then \
-	  bash $(SCRIPTS_DIR)/run-pipeline.sh "$(RUN_ID)" $(if $(INPUT),--input "$(INPUT)",) $(if $(OUTDIR),--outdir "$(OUTDIR)",) $(if $(filter 1 true,$(GEN3_SCRATCH_BENCHMARK)),--gen3-scratch-benchmark,) --resume -- --save_align_intermeds $(SAVE_ALIGN_INTERMEDS) $(NF_ARGS); \
-	else \
-	  bash $(SCRIPTS_DIR)/run-pipeline.sh "$(RUN_ID)" $(if $(INPUT),--input "$(INPUT)",) $(if $(OUTDIR),--outdir "$(OUTDIR)",) $(if $(filter 1 true,$(GEN3_SCRATCH_BENCHMARK)),--gen3-scratch-benchmark,) -- --save_align_intermeds $(SAVE_ALIGN_INTERMEDS) $(NF_ARGS); \
-	fi
+	bash $(SCRIPTS_DIR)/run-pipeline.sh "$(RUN_ID)" $(if $(INPUT),--input "$(INPUT)",) $(if $(OUTDIR),--outdir "$(OUTDIR)",) $(if $(filter 1 true,$(GEN3_SCRATCH_BENCHMARK)),--gen3-scratch-benchmark,) $(if $(filter 1 true,$(RESUME)),--resume,) -- --save_align_intermeds $(SAVE_ALIGN_INTERMEDS) $(NF_ARGS)
 
 deploy: ## Create the cluster and install the Nextflow platform
-	@test -n "$(STATE_BUCKET)" || { echo 'Set STATE_BUCKET to a unique S3 bucket name.'; exit 2; }
 	$(MAKE) cluster STATE_BUCKET="$(STATE_BUCKET)" STATE_PROJECT_ID="$(STATE_PROJECT_ID)" STATE_REGION="$(STATE_REGION)" AUTO_APPROVE="$(AUTO_APPROVE)"
 
 run: ## Run a synthetic or real samplesheet already stored in Object Storage
