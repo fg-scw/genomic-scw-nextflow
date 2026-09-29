@@ -4,11 +4,10 @@ source "$(cd "$(dirname "$0")" && pwd)/common.sh"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/run-pipeline.sh <run-id> [--input s3://bucket/samplesheet.csv]
+Usage: scripts/run-pipeline.sh <run-id> --input s3://bucket/samplesheet.csv
        [--outdir s3://bucket/prefix] [--resume] [--gen3-scratch-benchmark]
        [-- nf-core args...]
 
-Default input:  s3://<input bucket>/validation/<run-id>/samplesheet.csv
 Default output: s3://<results bucket>/runs/<run-id>
 Use --resume to reuse the same run's Nextflow cache after a failed/incomplete run.
 Use --gen3-scratch-benchmark only after verifying the gen3-probe /scratch NVMe mount.
@@ -69,6 +68,7 @@ for arg in "${EXTRA_ARGS[@]}"; do
       ;;
   esac
 done
+[[ -n "$INPUT_URI" ]] || fail "Pass --input with the S3 URI of the samplesheet."
 require_commands aws terraform kubectl jq
 load_bucket_outputs
 require_kubernetes_platform
@@ -125,20 +125,13 @@ SH
   kubectl delete job "$check_job" -n "$NS" --wait=true >/dev/null
 }
 
-INPUT_URI="${INPUT_URI:-$(s3_input_uri "$RUN_ID")}"
 OUTPUT_URI="${OUTPUT_URI:-$(s3_output_uri "$RUN_ID")}"
 [[ "$INPUT_URI" == s3://* ]] || fail "Input must be an S3 URI."
 [[ "$OUTPUT_URI" == s3://* ]] || fail "Output must be an S3 URI."
 
 if (( RESUME )); then
   load_pipeline_s3_credentials
-  if [[ "$INPUT_URI" == "$(s3_input_uri "$RUN_ID")" ]]; then
-    for object in samplesheet.csv SRR1039508_1.fastq.gz SRR1039508_2.fastq.gz; do
-      aws_pipeline s3api head-object --bucket "$INPUT_BUCKET" \
-        --key "validation/${RUN_ID}/${object}" >/dev/null 2>&1 \
-        || fail "Cannot resume ${RUN_ID}: prepared input object ${object} is missing or inaccessible. Run make prepare-demo RUN_ID=${RUN_ID} first."
-    done
-  elif [[ "$INPUT_URI" =~ ^s3://([^/]+)/(.+)$ ]]; then
+  if [[ "$INPUT_URI" =~ ^s3://([^/]+)/(.+)$ ]]; then
     input_bucket="${BASH_REMATCH[1]}"
     input_key="${BASH_REMATCH[2]}"
     aws_pipeline s3api head-object --bucket "$input_bucket" --key "$input_key" >/dev/null 2>&1 \

@@ -2,17 +2,11 @@
 # Synchronize the pipeline's least-privilege Object Storage credentials into K8s.
 source "$(cd "$(dirname "$0")" && pwd)/common.sh"
 
-require_commands scw terraform kubectl jq
-load_bucket_outputs
+require_commands scw terraform
+load_infra_region
 require_kubernetes_base
 
-secret_id="$(terraform -chdir="$TF_INFRA" output -raw pipeline_credentials_secret_id 2>/dev/null)" \
-  || fail "Terraform output pipeline_credentials_secret_id is unavailable."
-secret_id="$(normalize_secret_id "$secret_id")"
-revision="$(terraform -chdir="$TF_INFRA" output -raw pipeline_credentials_revision 2>/dev/null)" \
-  || fail "Terraform output pipeline_credentials_revision is unavailable."
-payload="$(scw secret version access "$secret_id" revision="$revision" region="$S3_REGION" raw=true 2>/dev/null)" \
-  || fail "Could not read pipeline credentials from Scaleway Secret Manager."
+payload="$(pipeline_credentials_payload)"
 
 tmp_dir="$(mktemp -d)"
 chmod 0700 "$tmp_dir"

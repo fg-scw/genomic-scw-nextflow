@@ -13,7 +13,7 @@ kubectl get events -n bioinformatics --sort-by=.lastTimestamp
 Pour reprendre un run, conserver le même `RUN_ID` et ne passer `RESUME=1` qu'après contrôle du workdir et des sorties intermédiaires :
 
 ```bash
-make run-pipeline RUN_ID=<run-id> RESUME=1
+make run RUN_ID=<run-id> INPUT=s3://bucket/path/samplesheet.csv RESUME=1
 ```
 
 Le runner conserve l'UUID de session Nextflow dans le PVC workdir, sous `.nextflow/sessions/<RUN_ID>`, puis passe cet UUID à `-resume`. Pour un run échoué créé avant ce suivi, retrouver son UUID dans l'historique ou le log Nextflow et créer ce fichier sur le PVC avant `RESUME=1`; le runner refuse de deviner la session globale la plus récente.
@@ -28,8 +28,8 @@ Le runner conserve l'UUID de session Nextflow dans le PVC workdir, sous `.nextfl
 | Conflit de nom ou rapports obsolètes pendant `-resume` | `-name` imposé ou Nextflow refuse d'écraser les fichiers trace/report/timeline existants. | Garder le même `RUN_ID`/workdir sans `-name`; activer `report.overwrite = true`, `timeline.overwrite = true` et `trace.overwrite = true`. |
 | Autoscaler évince le head Nextflow | Pod head considéré comme évictable. | Annoter le head `cluster-autoscaler.kubernetes.io/safe-to-evict: "false"`. |
 | STAR rapporte moins de 50 000 entrées sur le sous-ensemble démo | TrimGalore élimine quelques reads avant l'alignement. | Le validateur exige au moins 45 000 entrées STAR (90 % des 50 000 paires brutes) et affiche séparément le sous-ensemble brut et le compte après trimming. |
-| `validate-run` échoue sur macOS avec une classe awk non terminée | Slash non échappé dans une classe regex awk. | Séparer les clés S3 avec `awk -F/` et comparer les champs chemin; éviter `[^/]` dans une regex awk. |
-| `validate-run` ne trouve pas `quant.sf` | Le chemin supposé incluait `/salmon/`; nf-core/rnaseq 3.14.0 publie `star_salmon/<sample>/quant.sf`. | Valider les chemins contre les clés S3 réellement publiées par la version du pipeline. |
+| L'ancien validateur du POC échouait sur macOS avec une classe awk non terminée | Slash non échappé dans une classe regex awk. | Le correctif séparait les clés S3 avec `awk -F/` et comparait les champs chemin. |
+| L'ancien validateur du POC ne trouvait pas `quant.sf` | Le chemin supposé incluait `/salmon/`; nf-core/rnaseq 3.14.0 publie `star_salmon/<sample>/quant.sf`. | Le validateur a été corrigé d'après les clés S3 réelles du pipeline. |
 | Pod STAR reste `Terminating` en état D/I/O | Processus bloqué en attente d'I/O sur le stockage. | Attendre sa disparition effective avant reprise; inspecter nœud et stockage, ne pas le supprimer de force. |
 | Fichiers STAR subsistent sur `/scratch` après interruption | Le scratch `hostPath` est local au nœud; l'arrêt brutal peut empêcher le nettoyage de la tâche. | Reprendre depuis le workdir SFS avec le même `RUN_ID`; ne pas compter sur ces fichiers. Le remplacement du nœud les perd. |
 | Garde scratch échoue dans l'image STAR | L'image ne contient pas `stat`. | Le garde lit `/proc/mounts` et `df` pour vérifier ext4, le périphérique distinct, l'écriture et 60 GiB libres avant chaque pod STAR; il s'appliquera aux prochains runs. |

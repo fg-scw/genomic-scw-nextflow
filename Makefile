@@ -5,34 +5,35 @@ SCRIPTS_DIR := scripts
 NAMESPACE ?= bioinformatics
 KUBECONFIG ?= $(HOME)/.kube/config-hcl-public-netflow
 STATE_BUCKET ?=
-STATE_PROJECT_ID ?= 1d6906b8-42b0-4141-8752-28b7fcfccb95
+STATE_PROJECT_ID ?=
 STATE_REGION ?= fr-par
 RUN_ID ?=
+INPUT ?=
+OUTDIR ?=
 RESUME ?= 0
-AUTO_APPROVE ?= 0
+SAVE_ALIGN_INTERMEDS ?= false
+GEN3_SCRATCH_BENCHMARK ?= 0
 NF_ARGS ?=
 
-APPLY_FLAG := $(if $(filter 1 true,$(AUTO_APPROVE)),-auto-approve,)
 KUBECONFIG_ARG := -var="kubeconfig_path=$(KUBECONFIG)"
 export KUBECONFIG
 
 .PHONY: help bootstrap-state init infra-init infra-plan infra-apply kubeconfig platform-init platform-plan \
 	platform-apply sync-secret cluster plan fmt validate shell-syntax status outputs \
-	bootstrap-reference prepare-demo run-pipeline validate-run smoke-test deploy-and-validate \
-	destroy
+	bootstrap-reference run-pipeline destroy deploy run
 
 help: ## List available workflows
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z0-9_-]+:.*##/ {printf "\033[36m%-24s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-init: ## Bootstrap the backend bucket then initialize both Terraform roots
+init:
 	$(MAKE) bootstrap-state STATE_BUCKET=$(STATE_BUCKET) STATE_PROJECT_ID=$(STATE_PROJECT_ID) STATE_REGION=$(STATE_REGION)
 	$(MAKE) infra-init
 	$(MAKE) platform-init
 
-bootstrap-state: ## Create a private versioned state bucket before Terraform init
+bootstrap-state:
 	@test -n "$(STATE_BUCKET)" || { printf 'Set STATE_BUCKET to the dedicated Terraform state bucket name.\n' >&2; exit 2; }
 	@test -n "$(STATE_PROJECT_ID)" || { printf 'Set STATE_PROJECT_ID to the Scaleway project UUID for the state bucket.\n' >&2; exit 2; }
-	@printf '%s\n' "$(STATE_PROJECT_ID)" | grep -Eq '^[0-9a-fA-F-]{36}$$' || { printf 'STATE_PROJECT_ID must be a UUID.\n' >&2; exit 2; }
+	@printf '%s\n' "$(STATE_PROJECT_ID)" | grep -Eq '^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$$' || { printf 'STATE_PROJECT_ID must be a UUID.\n' >&2; exit 2; }
 	@if scw object bucket get "$(STATE_BUCKET)" project-id="$(STATE_PROJECT_ID)" region="$(STATE_REGION)" >/dev/null 2>&1; then \
 	  printf 'State bucket already exists: %s\n' "$(STATE_BUCKET)"; \
 	else \
@@ -51,96 +52,80 @@ bootstrap-state: ## Create a private versioned state bucket before Terraform ini
 	  test "$$status" = Enabled || { printf 'Versioning is not enabled for state bucket %s.\n' "$(STATE_BUCKET)" >&2; exit 1; }
 	@printf 'State bucket ready: %s (%s, versioning enabled)\n' "$(STATE_BUCKET)" "$(STATE_REGION)"
 
-infra-init: ## Initialize the Scaleway infrastructure Terraform root
+infra-init:
 	$(TF) -chdir=$(INFRA_DIR) init -input=false -backend-config=backend.hcl
 
-infra-plan: infra-init ## Review the infrastructure plan
+infra-plan: infra-init
 	$(TF) -chdir=$(INFRA_DIR) plan -input=false -var-file=terraform.tfvars
 
-infra-apply: infra-init ## Apply the infrastructure plan
-	$(TF) -chdir=$(INFRA_DIR) apply -input=false -var-file=terraform.tfvars $(APPLY_FLAG)
+infra-apply: infra-init
+	$(TF) -chdir=$(INFRA_DIR) apply -var-file=terraform.tfvars
 
-kubeconfig: ## Install the cluster kubeconfig at $(KUBECONFIG)
+kubeconfig:
 	@mkdir -p "$$(dirname "$(KUBECONFIG)")"
 	@cluster_id=$$($(TF) -chdir=$(INFRA_DIR) output -raw cluster_id) && \
 	region=$$($(TF) -chdir=$(INFRA_DIR) output -raw region) && \
 	scw k8s kubeconfig install "$$cluster_id" region="$$region"
 	@kubectl get nodes -o wide
 
-platform-init: ## Initialize the Kubernetes resources Terraform root
+platform-init:
 	$(TF) -chdir=$(K8S_DIR) init -input=false -backend-config=backend.hcl
 
-platform-plan: platform-init ## Review the Kubernetes resources plan
+platform-plan: platform-init
 	$(TF) -chdir=$(K8S_DIR) plan -input=false -var-file=terraform.tfvars $(KUBECONFIG_ARG)
 
-platform-apply: platform-init ## Apply namespace, RBAC, PVCs and pipeline configuration
-	$(TF) -chdir=$(K8S_DIR) apply -input=false -var-file=terraform.tfvars $(KUBECONFIG_ARG) $(APPLY_FLAG)
+platform-apply: platform-init
+	$(TF) -chdir=$(K8S_DIR) apply -var-file=terraform.tfvars $(KUBECONFIG_ARG)
 
-sync-secret: ## Copy the pipeline S3 secret from Scaleway Secret Manager into Kubernetes
+sync-secret:
 	bash $(SCRIPTS_DIR)/sync-k8s-secret.sh
 
-cluster: ## Deploy infrastructure, install kubeconfig, create platform resources and sync the secret
+cluster:
 	$(MAKE) bootstrap-state STATE_BUCKET=$(STATE_BUCKET) STATE_PROJECT_ID=$(STATE_PROJECT_ID) STATE_REGION=$(STATE_REGION)
-	$(MAKE) infra-apply AUTO_APPROVE=$(AUTO_APPROVE)
+	$(MAKE) infra-apply
 	$(MAKE) kubeconfig
-	$(MAKE) platform-apply AUTO_APPROVE=$(AUTO_APPROVE)
+	$(MAKE) platform-apply
 	$(MAKE) sync-secret
 
-plan: ## Review both Terraform plans in deployment order
+plan: ## Review the infrastructure plan
 	$(MAKE) infra-plan
-	$(MAKE) platform-plan
 
-fmt: ## Format Terraform files
+outputs: ## Show bucket names and cluster details
+	$(TF) -chdir=$(INFRA_DIR) output
+
+fmt:
 	$(TF) fmt -recursive
 
-validate: ## Initialize providers without a backend and validate both Terraform roots
+validate:
 	@set -eu; for dir in $(INFRA_DIR) $(K8S_DIR); do \
 		$(TF) -chdir=$$dir init -backend=false -input=false; \
 		$(TF) -chdir=$$dir validate; \
 	done
 
-shell-syntax: ## Check shell script syntax with Bash
+shell-syntax:
 	@set -eu; for script in $(SCRIPTS_DIR)/*.sh; do bash -n "$$script"; done
 
-status: ## Show cluster nodes, PVCs, Jobs and pods
+status: ## Show cluster nodes and Nextflow jobs
 	kubectl get nodes -o wide
 	kubectl get pvc -n $(NAMESPACE)
 	kubectl get jobs,pods -n $(NAMESPACE) -o wide
 
-outputs: ## Show infrastructure outputs
-	$(TF) -chdir=$(INFRA_DIR) output
-
-bootstrap-reference: ## Download and prepare GRCh38 reference data on the reference PVC
+bootstrap-reference:
 	bash $(SCRIPTS_DIR)/bootstrap-reference.sh
 
-prepare-demo: ## Download and upload the human validation dataset (requires RUN_ID)
-	@test -n "$(RUN_ID)" || { echo 'Set RUN_ID, e.g. make prepare-demo RUN_ID=validation-20260925'; exit 2; }
-	bash $(SCRIPTS_DIR)/prepare-demo.sh "$(RUN_ID)"
+run-pipeline:
+	@test -n "$(RUN_ID)" || { echo 'Set RUN_ID to a unique run name.'; exit 2; }
+	bash $(SCRIPTS_DIR)/run-pipeline.sh "$(RUN_ID)" $(if $(INPUT),--input "$(INPUT)",) $(if $(OUTDIR),--outdir "$(OUTDIR)",) $(if $(filter 1 true,$(GEN3_SCRATCH_BENCHMARK)),--gen3-scratch-benchmark,) $(if $(filter 1 true,$(RESUME)),--resume,) -- --save_align_intermeds $(SAVE_ALIGN_INTERMEDS) $(NF_ARGS)
 
-run-pipeline: ## Run nf-core/rnaseq (requires RUN_ID; set RESUME=1 to resume)
-	@test -n "$(RUN_ID)" || { echo 'Set RUN_ID, e.g. make run-pipeline RUN_ID=validation-20260925'; exit 2; }
-	@if [ "$(RESUME)" = 1 ]; then \
-		bash $(SCRIPTS_DIR)/run-pipeline.sh "$(RUN_ID)" --resume -- --save_align_intermeds true $(NF_ARGS); \
-	else \
-		bash $(SCRIPTS_DIR)/run-pipeline.sh "$(RUN_ID)" -- --save_align_intermeds true $(NF_ARGS); \
-	fi
+deploy: ## Create the cluster and install the Nextflow platform
+	$(MAKE) cluster STATE_BUCKET="$(STATE_BUCKET)" STATE_PROJECT_ID="$(STATE_PROJECT_ID)" STATE_REGION="$(STATE_REGION)"
 
-validate-run: ## Validate pipeline outputs for RUN_ID
-	@test -n "$(RUN_ID)" || { echo 'Set RUN_ID, e.g. make validate-run RUN_ID=validation-20260925'; exit 2; }
-	bash $(SCRIPTS_DIR)/validate-run.sh "$(RUN_ID)"
-
-smoke-test: ## Prepare, run and validate the small human genomic validation dataset
-	@test -n "$(RUN_ID)" || { echo 'Set RUN_ID, e.g. make smoke-test RUN_ID=validation-20260925'; exit 2; }
+run: ## Run a synthetic or real samplesheet already stored in Object Storage
+	@test -n "$(RUN_ID)" || { echo 'Set RUN_ID to a unique run name.'; exit 2; }
+	@test -n "$(INPUT)" || { echo 'Set INPUT to s3://bucket/path/samplesheet.csv.'; exit 2; }
 	$(MAKE) bootstrap-reference
-	@if [ "$(RESUME)" != 1 ]; then $(MAKE) prepare-demo RUN_ID="$(RUN_ID)"; fi
-	$(MAKE) run-pipeline RUN_ID="$(RUN_ID)" RESUME="$(RESUME)"
-	$(MAKE) validate-run RUN_ID="$(RUN_ID)"
+	$(MAKE) run-pipeline RUN_ID="$(RUN_ID)" INPUT="$(INPUT)" OUTDIR="$(OUTDIR)" RESUME="$(RESUME)" SAVE_ALIGN_INTERMEDS="$(SAVE_ALIGN_INTERMEDS)" GEN3_SCRATCH_BENCHMARK="$(GEN3_SCRATCH_BENCHMARK)" NF_ARGS="$(NF_ARGS)"
 
-deploy-and-validate: ## Deploy everything, prepare GRCh38, and run an end-to-end human validation
-	@test -n "$(RUN_ID)" || { echo 'Set RUN_ID, e.g. make deploy-and-validate RUN_ID=validation-20260925'; exit 2; }
-	$(MAKE) cluster STATE_BUCKET="$(STATE_BUCKET)" STATE_PROJECT_ID="$(STATE_PROJECT_ID)" STATE_REGION="$(STATE_REGION)" AUTO_APPROVE=$(AUTO_APPROVE)
-	$(MAKE) smoke-test RUN_ID=$(RUN_ID)
-
-destroy: ## Destroy platform then infrastructure (interactive; back up SFS data first)
-	$(TF) -chdir=$(K8S_DIR) destroy -input=false -var-file=terraform.tfvars $(KUBECONFIG_ARG)
-	$(TF) -chdir=$(INFRA_DIR) destroy -input=false -var-file=terraform.tfvars
+destroy: ## Destroy Kubernetes and Scaleway resources (interactive)
+	$(TF) -chdir=$(K8S_DIR) destroy -var-file=terraform.tfvars $(KUBECONFIG_ARG)
+	$(TF) -chdir=$(INFRA_DIR) destroy -var-file=terraform.tfvars

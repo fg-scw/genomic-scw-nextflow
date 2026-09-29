@@ -1,6 +1,11 @@
 variable "scw_project_id" {
   description = "Scaleway Project UUID. Credentials come from SCW_ACCESS_KEY and SCW_SECRET_KEY."
   type        = string
+
+  validation {
+    condition     = can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", var.scw_project_id))
+    error_message = "scw_project_id must be a Scaleway project UUID."
+  }
 }
 
 variable "operator_user_id" {

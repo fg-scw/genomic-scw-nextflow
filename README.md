@@ -1,73 +1,53 @@
-# nf-core/rnaseq sur Scaleway Kapsule
+# RNA-seq sur Scaleway Kapsule
 
-POC Terraform pour Kapsule **1.37.0**, Nextflow **25.10.4** et `nf-core/rnaseq` **3.14.0**. Le projet Scaleway précréé `hcl-nextflow` (`1d6906b8-42b0-4141-8752-28b7fcfccb95`, organisation SA-Demo) est en région `fr-par`, zone `fr-par-3`; Terraform y déploie les ressources.
+Ce dépôt déploie Kapsule **1.37.0**, Nextflow **25.10.4** et nf-core/rnaseq **3.14.0**. Les pools de calcul se mettent à l'échelle à la demande. Le test intégré utilise GRCh38 Ensembl 110 et 50 000 paires de reads.
 
-Le pipeline utilise `nf-k8s` 1.2.2, `nf-amazon` 3.4.1 et GRCh38 Ensembl 110. Les entrées et résultats vont dans Object Storage; le workdir Nextflow et la référence partagée sont sur SFS RWX.
-
-## Infrastructure
+## Architecture
 
 ```mermaid
 flowchart LR
-  subgraph SCW["Projet hcl-nextflow · région fr-par"]
-    subgraph K["Kapsule 1.37.0"]
-      subgraph AZ3["fr-par-3"]
-        REF["Bootstrap · orchestrator<br/>POP2-4C-16G"]
-        HEAD["Head Nextflow<br/>star-compute · POP2-HM-8C-64G"]
-        TASKS["Pods nf-core par défaut<br/>sur POP2"]
-      end
-      subgraph AZ2["fr-par-2 · profil STAR opt-in"]
-        GEN3["Nœud gen3-probe<br/>MEMORY3-X8C-64G<br/>scw-create-scratch-volume"]
-        STAR["Pods STAR_ALIGN / STAR_GENOMEGENERATE"]
-        NVME[("NVMe local<br/>hostPath /scratch · éphémère")]
-        BLOCK["Block Storage sbs_5k<br/>racine gen3-probe seulement"]
-      end
+  S3IN[("Object Storage<br/>samplesheet + FASTQ")] -->|samplesheet| HEAD
+  OP["Machine opérateur<br/>Terraform"] --> K
+  subgraph K["Kapsule 1.37"]
+    ORCH["Pool orchestrator<br/>bootstrap référence"]
+    HEAD["Job Nextflow head<br/>sur star-compute"]
+    subgraph TASK["Pods nf-core/rnaseq"]
+      STAR["STAR / Salmon / QC"]
+      SCRATCH[("/scratch<br/>NVMe local, optionnel")]
     end
-    WORK[("SFS RWX<br/>workdir · 200 Go")]
-    REFVOL[("SFS RWX<br/>référence · 50 Go")]
-    SHEET[("Object Storage<br/>samplesheet")]
-    FASTQ[("Object Storage<br/>FASTQ")]
-    RESULTS[("Object Storage<br/>résultats")]
+    HEAD --> STAR
   end
-
-  REF -->|"écrit la référence"| REFVOL
-  REFVOL -->|"FASTA/GTF pour STAR_GENOMEGENERATE"| STAR
-  REFVOL -->|"lecture de référence par défaut"| TASKS
-  HEAD -->|"orchestration"| TASKS
-  HEAD -.->|"profil gen3_scratch_benchmark"| STAR
-  GEN3 --> STAR
-  SHEET -->|"lecture au lancement"| HEAD
-  FASTQ -->|"source des reads"| HEAD
-  HEAD <-->|"staging FASTQ / reprise"| WORK
-  WORK -->|"index lu par STAR_ALIGN sur SFS"| STAR
-  STAR -->|"sorties déclarées vers SFS"| WORK
-  STAR -->|"fichiers temporaires"| NVME
-  WORK -->|"workdir partagé"| TASKS
-  TASKS -->|"sorties de tâches"| WORK
-  HEAD -->|"publishDir depuis le workdir SFS"| RESULTS
-  GEN3 --> BLOCK
+  ORCH --> REFVOL[("SFS référence<br/>GRCh38")]
+  REFVOL --> STAR
+  S3IN -->|FASTQ| STAR
+  WORK[("SFS workdir<br/>cache et reprise")] <--> HEAD
+  WORK <--> STAR
+  STAR --> WORK
+  WORK -->|publication| S3OUT[("Object Storage<br/>résultats")]
+  STAR -. "profil GEN3 seulement<br/>hostPath" .-> SCRATCH
+  STATE[("Object Storage<br/>Terraform state")] -. "state + lock" .-> OP
 ```
 
-Le tag `scw-create-scratch-volume` est posé sur les trois pools Terraform; il ne fournit un volume utilisable que sur les nouveaux nœuds compatibles créés avec ce tag. La présence d'un scratch sur les POP2 déjà provisionnés n'est pas garantie.
+Le workdir partagé conserve les tâches terminées et permet la reprise avec le même RUN_ID. Le scratch est local au nœud, éphémère et utilisé seulement avec le profil GEN3. Les trois pools portent le tag scw-create-scratch-volume; seuls les nœuds compatibles créés avec ce tag reçoivent le volume.
 
-## Workflow
+## Avant de commencer
 
-```mermaid
-flowchart LR
-  A[Bootstrap state] --> B[Terraform infrastructure]
-  B --> C[Kubeconfig + Terraform Kubernetes]
-  C --> D[Sync secret]
-  D --> E[Préparer GRCh38 et FASTQ]
-  E --> F[Exécuter nf-core/rnaseq]
-  F --> G[Valider Job, BAM, quantifications, MultiQC]
+Sur macOS avec Homebrew :
+
+```bash
+brew install scw kubectl awscli jq make curl gzip
+brew tap hashicorp/tap
+brew install hashicorp/tap/terraform
+scw login
 ```
 
-## Prérequis et configuration
+Terraform 1.11 ou plus récent est requis. Il faut aussi une API key Scaleway autorisée à gérer le projet (réseau, Kapsule, SFS, Object Storage, Secret Manager) et les ressources IAM de l'application Nextflow. En pratique, demandez les permission sets **AllProductsFullAccess** sur le projet dédié et **IAMApplicationManager** (ou **IAMManager**) pour créer l'application, sa clé et sa politique. Voir la [documentation IAM Scaleway](https://www.scaleway.com/en/docs/iam/credentials/create-api-keys/). L'opérateur doit pouvoir lire le secret de pipeline. Pour le premier déploiement, préparez un bucket S3 privé et versionné pour l'état Terraform, ainsi que ses identifiants S3 (AWS_ACCESS_KEY_ID et AWS_SECRET_ACCESS_KEY). Placez ce bucket dans un **projet Scaleway distinct** du projet Nextflow : l'identité du pipeline possède des droits Object Storage à l'échelle de son projet.
 
-Installer Terraform 1.11+, Scaleway CLI `scw`, `kubectl`, AWS CLI v2, `jq`, `curl`, `gzip`, `make` et Bash. Le profil Scaleway doit gérer le projet dédié et lire ses secrets. Un accès S3 backend distinct est requis.
+Dans la console Scaleway, vérifiez les [quotas de l'organisation](https://www.scaleway.com/en/docs/organizations-and-projects/organization/organization-quotas/) et les disponibilités en fr-par-3 (et fr-par-2 pour le pool GEN3) : nœuds des types configurés, CPU/RAM, Kapsule, volumes SFS de 200 et 50 Go, buckets Object Storage et objets IAM/Secrets. Les quotas varient selon l'organisation; demandez leur augmentation avant le déploiement si nécessaire. Renseignez l'UUID de l'opérateur dans operator_user_id.
 
-Variables : `SCW_PROFILE` pour Scaleway; `STATE_SECRET_ID`, `STATE_SECRET_REVISION` et `STATE_REGION` pour charger l'identité backend; `STATE_BUCKET` pour les deux states; `RUN_ID` pour chaque run. `STATE_PROJECT_ID` est déjà réglé sur le projet `hcl-nextflow` dans Makefile.
+## Configuration et déploiement
 
-Copier les exemples puis remplacer le bucket `REPLACE_WITH_PRECREATED_STATE_BUCKET` par le même nom dans les deux fichiers backend :
+Copiez les exemples de configuration :
 
 ```bash
 cp terraform/infra/backend.hcl.example terraform/infra/backend.hcl
@@ -76,119 +56,84 @@ cp terraform/infra/terraform.tfvars.example terraform/infra/terraform.tfvars
 cp terraform/kubernetes/terraform.tfvars.example terraform/kubernetes/terraform.tfvars
 ```
 
-Dans `terraform/infra/terraform.tfvars`, renseigner `operator_user_id` avec l'UUID de l'utilisateur Scaleway autorisé à lire les métadonnées des deux buckets.
+Dans les deux backend.hcl, mettez le nom du même bucket d'état. Dans terraform/infra/terraform.tfvars, indiquez le Project UUID cible et l'UUID utilisateur operator_user_id. Ajustez les types et tailles dans ce fichier si besoin. Ne commitez ni ces fichiers générés, ni vos clés. L'état Terraform infra contient la clé IAM du pipeline : limitez l'accès au bucket d'état et à ses anciennes versions. `STATE_PROJECT_ID` doit être l'UUID du projet d'état, différent de `scw_project_id`.
 
-Le bucket Terraform doit être privé et versionné. Il est distinct des buckets input/résultats. La cible `make bootstrap-state` le crée (ou vérifie son versioning); elle passe le `STATE_PROJECT_ID` explicitement au CLI Scaleway.
-
-Définir le profil Scaleway et les coordonnées non secrètes de la clé backend, puis la charger dans le shell courant. Remplacer les valeurs d'exemple par celles de l'environnement. La valeur du secret ne s'affiche pas et ne s'écrit pas dans le dépôt :
+Créez le bucket d'état avant le premier plan. Les identifiants S3 de ce bucket doivent être actifs dans le shell sous AWS_ACCESS_KEY_ID et AWS_SECRET_ACCESS_KEY :
 
 ```bash
-export SCW_PROFILE="your-scaleway-profile"
-export STATE_SECRET_ID="your-secret-id"
-export STATE_SECRET_REVISION="your-secret-revision"
-export STATE_REGION="fr-par"
-set +x
-state_credentials="$(scw secret version access "$STATE_SECRET_ID" revision="$STATE_SECRET_REVISION" region="$STATE_REGION" raw=true)"
-export AWS_ACCESS_KEY_ID="$(jq -er '.access_key' <<<"$state_credentials")"
-export AWS_SECRET_ACCESS_KEY="$(jq -er '.secret_key' <<<"$state_credentials")"
-unset state_credentials
-export STATE_BUCKET="replace-with-unique-state-bucket"
+make bootstrap-state STATE_BUCKET=mon-bucket-etat STATE_PROJECT_ID=project-uuid
 ```
 
-Les scripts du pipeline lisent automatiquement leur propre clé S3 depuis Secret Manager. `PIPELINE_S3_ACCESS_KEY` et `PIPELINE_S3_SECRET_KEY` ne sont que des surcharges locales. Ne jamais enregistrer de clé, secret ou kubeconfig dans Git.
-
-Les permissions Object Storage Scaleway sont accordées au niveau projet. Les identités pipeline et backend couvrent les buckets du projet selon leurs permission sets; le projet doit rester dédié à cette solution. La clé backend comprend la suppression nécessaire au verrou Terraform `.tflock`.
-
-## Déployer et valider
-
-`deploy-and-validate` déploie l'infrastructure puis Kubernetes, synchronise le secret, prépare la référence et un petit jeu RNA-seq humain, lance le pipeline et contrôle les artefacts :
+Le premier plan vérifie l'infrastructure Scaleway. Examinez-le puis déployez :
 
 ```bash
-make deploy-and-validate STATE_BUCKET="$STATE_BUCKET" RUN_ID=validation-20260925
+make plan
+make deploy STATE_BUCKET=mon-bucket-etat STATE_PROJECT_ID=project-uuid
 ```
 
-Terraform demande confirmation. Après revue des plans, `AUTO_APPROVE=1` permet une exécution non interactive. Pour un cluster existant :
+Le déploiement crée les buckets, le réseau, Kapsule, les pools, SFS, l'identité de pipeline, le namespace, les PVC et le secret Kubernetes. Terraform affiche et demande confirmation pour chacun des deux plans, infrastructure puis Kubernetes.
+
+## Lancer un run synthétique, puis vos données
+
+Le dépôt ne génère pas de FASTQ. Utilisez un jeu synthétique fourni par votre équipe ou votre outil de simulation, puis répétez les étapes avec les échantillons réels. Chaque run a son propre identifiant et son propre préfixe S3.
+
+Préparez une samplesheet nf-core/rnaseq et déposez-la avec les FASTQ dans le bucket d'entrée, sous validation/<run-id>/. Le CSV doit référencer les FASTQ par URI s3:// :
+
+```csv
+sample,fastq_1,fastq_2,strandedness
+patient_001,s3://BUCKET/validation/synthetic-001/patient_001_R1.fastq.gz,s3://BUCKET/validation/synthetic-001/patient_001_R2.fastq.gz,unstranded
+```
+
+Récupérez le nom du bucket avec make outputs. Pour utiliser AWS CLI, chargez la clé de l'application depuis Secret Manager :
 
 ```bash
-make smoke-test RUN_ID=validation-20260925
-make validate-run RUN_ID=validation-20260925
+SECRET_ID=$(terraform -chdir=terraform/infra output -raw pipeline_credentials_secret_id)
+SECRET_REVISION=$(terraform -chdir=terraform/infra output -raw pipeline_credentials_revision)
+SECRET=$(scw secret version access "$SECRET_ID" revision="$SECRET_REVISION" region=fr-par raw=true)
+export AWS_ACCESS_KEY_ID=$(jq -er '.access_key' <<<"$SECRET")
+export AWS_SECRET_ACCESS_KEY=$(jq -er '.secret_key' <<<"$SECRET")
+export AWS_DEFAULT_REGION=fr-par
+unset SECRET
+```
+
+Déposez les FASTQ et le CSV avec l'endpoint https://s3.fr-par.scw.cloud. La policy de l'application autorise l'écriture sous validation/. Exemple, après avoir remplacé BUCKET par le résultat de make outputs :
+
+```bash
+aws --endpoint-url https://s3.fr-par.scw.cloud s3 cp patient_001_R1.fastq.gz s3://BUCKET/validation/synthetic-001/
+aws --endpoint-url https://s3.fr-par.scw.cloud s3 cp patient_001_R2.fastq.gz s3://BUCKET/validation/synthetic-001/
+aws --endpoint-url https://s3.fr-par.scw.cloud s3 cp samplesheet.csv s3://BUCKET/validation/synthetic-001/
+```
+
+Vous pouvez aussi utiliser la console Object Storage. Lancez ensuite :
+
+```bash
+make run RUN_ID=synthetic-001 INPUT=s3://BUCKET/validation/synthetic-001/samplesheet.csv
+```
+
+make run vérifie la référence GRCh38 sur SFS (et l'installe si nécessaire), puis attend la fin du pipeline. La commande échoue si Nextflow retourne une erreur. Contrôlez le rapport MultiQC et les fichiers de sortie, puis lancez les données réelles avec une nouvelle samplesheet :
+
+```bash
+make run RUN_ID=real-001 INPUT=s3://BUCKET/validation/real-001/samplesheet.csv
+```
+
+Les ressources par processus se règlent dans nextflow/nextflow.config; les paramètres, notamment la référence, dans nextflow/params.yaml. Pour reprendre un run échoué, vérifiez ses entrées et son workdir SFS puis gardez le même identifiant :
+
+```bash
+make run RUN_ID=synthetic-001 INPUT=s3://BUCKET/validation/synthetic-001/samplesheet.csv RESUME=1
 make status
+kubectl logs -n bioinformatics -f job/nextflow-synthetic-001
 ```
 
-Avant de détruire, sauvegarder les données S3/SFS à conserver et arrêter les jobs actifs. `make destroy` est interactif; le bucket de state est conservé :
+Par défaut, les BAM intermédiaires ne sont pas conservés pour limiter stockage et transferts. Pour les garder, ajoutez SAVE_ALIGN_INTERMEDS=true à make run.
+
+Pour tester les pods STAR sur le pool MEMORY3 et son NVMe /scratch, après avoir vérifié le montage du nouveau nœud :
 
 ```bash
-make destroy
+make run RUN_ID=scratch-001 INPUT=s3://BUCKET/validation/scratch-001/samplesheet.csv GEN3_SCRATCH_BENCHMARK=1
 ```
 
-Le run utilise une entrée SRR1039508 réduite à 50 000 paires. La validation vérifie la fin du Job, les logs STAR, le BAM, les quantifications et le rapport MultiQC. Elle confirme le fonctionnement technique, pas la validité biologique des résultats. Reprendre explicitement un run avec `RESUME=1` après vérification du workdir :
+## Nettoyage et limites
 
-```bash
-make smoke-test RUN_ID=validation-20260925 RESUME=1
-```
+Avant make destroy, arrêtez les jobs et sauvegardez les données S3/SFS à garder. Le bucket d'état reste en place. destroy demande confirmation.
 
-Pour exécuter le profil GEN3, `make smoke-test` ne transmet pas l'option. Sur un cluster prêt avec la référence initialisée :
-
-```bash
-make prepare-demo RUN_ID=gen3-scratch-repeat
-bash scripts/run-pipeline.sh gen3-scratch-repeat --gen3-scratch-benchmark -- --save_align_intermeds true
-make validate-run RUN_ID=gen3-scratch-repeat
-```
-
-Avant de soumettre le Job, le script vérifie `/scratch` avec un préflight `hostPath.type: Directory` : montage ext4 séparé et inscriptible. Le garde `/proc/mounts` + `df` dans chaque pod STAR s'appliquera aux prochains runs; il n'était pas inclus dans le ConfigMap du retry documenté ci-dessous. Pour reprendre un run, ajouter `--resume` avant `--` à la commande du script.
-
-## POC et production
-
-Le dépôt vise la faisabilité et la stabilité d'un POC sur un petit jeu, pas l'exécution d'un lot de 300–400 échantillons ou 2,2 To; cette échelle relève d'une qualification production séparée. Le pilote a validé le parcours technique sur un PVC workdir SFS de 200 Go et une référence de 50 Go; cela ne valide pas la biologie. Le chargement STAR a observé environ 22 MB/s sur SFS, sans comparaison contrôlée entre les PVC de 100 et 200 Go. Le bootstrap d'un ancien manifeste a pris 11 min 46 s pour vérifier les fichiers et enregistrer leurs tailles (FASTA 3 151 425 851 B, GTF 1 463 917 491 B); le contrôle suivant a pris 13 s sans nouveau SHA. Un exercice de restauration d'un fichier de 1 MiB depuis SFS et S3 a rendu le même SHA-256 (`634fbf86…dbf`); les données de test ont été nettoyées, mais une restauration complète n'est pas qualifiée.
-
-Le profil opt-in `gen3_scratch_benchmark` place les étapes STAR sur `gen3-probe` en `fr-par-2`; les autres tâches restent sur `star-compute` en `fr-par-3`. Les runs POP2 et GEN3 ont passé les contrôles techniques; les FASTQ et BAM comparés ont des SHA-256 identiques. Les comptes Salmon non nuls sont 10 052 (POP2), 10 036 (GEN3 initial) et 10 040 (reprise). L'inférence Salmon est une cause probable des écarts, non démontrée; aucun seuil QC biologique précis n'est défini. Le retry `gen3-recovery-20260926` a terminé et passé `make validate-run` à 11:50:16 UTC après remplacement du nœud; quatre BAM et featureCounts sont identiques au run GEN3 précédent. Les détails figurent dans [Préparation production](docs/PRODUCTION-READINESS.md).
-
-Avant toute production, faire un benchmark représentatif STAR, dimensionner SFS/autoscaling, tester reprise et restauration, définir rétention/observabilité, et faire valider les métriques QC. Les permissions IAM objet sont à l'échelle du projet : séparer aussi le backend Terraform dans un projet isolé ou protéger explicitement les autres buckets.
-
-Voir [Préparation production](docs/PRODUCTION-READINESS.md) pour le périmètre et les limites du benchmark scratch. Les opérations de reprise et destruction sont dans [Exploitation](docs/OPERATIONS.md).
-
-## Observations du pilote — 25 septembre 2026 (UTC)
-
-| Timestamp UTC | Étape | Résultat observé | Pool / lieu |
-|---|---|---|---|
-| 13:47:37–14:46:37 | Bootstrap de la référence | Job GRCh38 Ensembl 110 terminé. | orchestrator |
-| 15:00:27 | Premier Job Nextflow | Démarrage du run; une tâche STAR de tri apparaît à 15:36:59. | star-compute |
-| ≈16:07 | Éviction autoscaler | Head évincé; le pod STAR porte un `deletionTimestamp` à 16:06:50. | star-compute |
-| 16:19:06–16:19:56 | Reprise | Job/head puis pod STAR recréés; caches Nextflow réutilisés. | star-compute |
-| 16:27:49 | Index STAR | Nouvelle étape de génération d'index observée. | star-compute |
-| 16:43:46 | Étape STAR de tri | Étape observée après la reprise. | star-compute |
-| ≈17:05 | Écriture `SA_*` | Écriture de blocs temporaires observée; Job encore `Running` lors de la capture de 17:41. | star-compute |
-| 18:28:01 | Suffix array STAR | Génération et empaquetage terminés. | star-compute |
-| 18:59:52 | Génération de l'index STAR | Étape terminée avec succès. | star-compute |
-| 18:59:56–19:22:29 | Lecture de l'index STAR | 29,8 GB chargés depuis SFS en 22 min 33 s. | star-compute |
-| ≈19:26 | Alignement STAR | 49 539 reads après trimming; 94,06 % mappés de façon unique; BAM de 7,6 MB. | star-compute |
-| 19:28:59 | Pool de calcul | Le second nœud `star-compute` est `Ready`. | star-compute |
-| 19:38:41 | Job Nextflow | Job terminé (`Complete`). | star-compute |
-| ≈19:43 | `make validate-run` | Validation passée : BAM de 7 864 439 octets, 10 052 transcrits quantifiés, 13 gènes avec des comptes non nuls et rapport MultiQC présent. | — (commande locale) |
-
-## Essai GEN3 — 26 septembre 2026 (UTC)
-
-| Timestamp UTC | Étape | Résultat observé | Pool / lieu |
-|---|---|---|---|
-| 08:08:29 | `STAR_GENOMEGENERATE` | Début de tâche; ~4,3 GiB de FASTA/GTF copiés sur scratch avant le calcul (durée de copie non isolée). | gen3-probe |
-| 08:54:16 | Calcul STAR | Calcul interne terminé. | gen3-probe |
-| ≈09:16:56 | Fin de tâche et copie de l'index | 29,8 GB recopiés vers SFS en ~22 min 40 s (~22 MB/s). Durée Nextflow 1 h 08 min 27 s, `realtime` 36 min 40 s, CPU 447,1 %, RSS maximale 51,5 GB. | gen3-probe → SFS |
-| 09:17:02 | `STAR_ALIGN` | Durée de tâche 25 min 31 s (`realtime` 25 min 29 s); baseline POP2 26 min 24 s (26 min 23 s). | gen3-probe |
-| 09:18:42–09:39:35 | Lecture de l'index par STAR | 20 min 53 s depuis SFS, contre 22 min 33 s sur POP2; le scratch n'a pas mis l'index en cache. | gen3-probe → SFS |
-| 09:52:48 | Job Nextflow | Terminé avec succès (`completionTime`). | star-compute (head) |
-| Après 09:52:48 | `make validate-run` | Passé : 49 539 paires après trimming, 94,06 % mappés de façon unique, BAM 7 864 439 octets, 10 036 lignes Salmon non nulles, 13 gènes featureCounts non nuls et rapport MultiQC présent. | — (commande locale) |
-
-## Reprise GEN3 après remplacement de nœud — 26 septembre 2026 (UTC)
-
-| Timestamp UTC | Étape | Résultat observé | Pool / lieu |
-|---|---|---|---|
-| 11:12:46 | Remplacement de nœud pendant STAR | Le run `gen3-recovery-20260926` a été automatiquement repris avec le même `RUN_ID` sur `bbfe88`; une vérification manuelle dans le pod a trouvé `root=overlay` et `/scratch=/dev/sdb ext4` (~145,6 GiB). | gen3-probe |
-| 11:50:16 | Job Nextflow de reprise | Terminé avec succès; le nouveau garde `/proc/mounts` + `df` n'était pas dans son ConfigMap. | star-compute (head) |
-| Après 11:50:16 | `make validate-run` | Passé : 49 539 paires après trimming, 94,06 % mappés de façon unique, BAM 7 864 439 octets, 10 040 transcrits Salmon non nuls, 13 gènes featureCounts non nuls et MultiQC présent. Quatre BAM et featureCounts sont identiques octet par octet au premier run GEN3. | — (commande locale) |
-
-## Vérification rapide de la référence — 26 septembre 2026 (UTC)
-
-| Timestamp UTC | Étape | Résultat observé | Pool / lieu |
-|---|---|---|---|
-| 11:53:41–12:05:27 | Migration d'un ancien manifeste | SHA complet passé (`genome.fa OK`, `genes.gtf OK`); tailles enregistrées : FASTA 3 151 425 851 B, GTF 1 463 917 491 B. Durée 11 min 46 s. | orchestrator |
-| 12:06:18–12:06:31 | Bootstrap suivant | Contrôle rapide des tailles réussi en 13 s, sans nouveau SHA. | orchestrator |
+Le dépôt valide le parcours POC sur un petit jeu; il ne qualifie pas encore le dimensionnement production, une restauration complète ni les seuils biologiques. Les constats et corrections des incidents de reprise sont dans [Exploitation](docs/OPERATIONS.md); mesures et limites de performance dans [Préparation production](docs/PRODUCTION-READINESS.md).
