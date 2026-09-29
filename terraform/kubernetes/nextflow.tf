@@ -107,14 +107,3 @@ resource "kubernetes_persistent_volume_claim" "reference" {
 
   wait_until_bound = false
 }
-
-resource "kubernetes_config_map" "nextflow_config" {
-  metadata {
-    name      = "nextflow-config"
-    namespace = kubernetes_namespace.bioinformatics.metadata[0].name
-  }
-
-  data = {
-    "nextflow.config" = file("${path.module}/../../nextflow/nextflow.config")
-  }
-}
