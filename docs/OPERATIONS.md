@@ -70,7 +70,7 @@ Si deux opérateurs travaillent sur la même racine, le second reçoit une erreu
 terraform -chdir=terraform/infra force-unlock LOCK_ID
 ```
 
-Remplacez `infra` par `kubernetes` pour l'autre state. Ne supprimez jamais `.tflock` à la main. Le state, ses versions antérieures et les fichiers de plan peuvent contenir des secrets, dont la clé IAM du pipeline : ne les commitez ni ne les partagez, et restreignez leur lecture.
+Remplacez `infra` par `kubernetes` pour l'autre state. Ne supprimez jamais `.tflock` à la main. Sur le bucket pilote, un second `plan` lancé pendant un `apply` temporaire a été refusé par le verrou S3 le 29 septembre 2026; il a réussi après la fin de l'`apply`. Ce test valide la concurrence entre deux processus, pas les droits de deux identités distinctes. Le state, ses versions antérieures et les fichiers de plan peuvent contenir des secrets, dont la clé IAM du pipeline : ne les commitez ni ne les partagez, et restreignez leur lecture.
 
 Les exemples activent `encrypt=true`. Le bucket pilote en `fr-par` a accepté un PUT temporaire avec `AES256` et les plans Terraform avec verrou le 29 septembre 2026. La [documentation Scaleway](https://www.scaleway.com/en/docs/object-storage/troubleshooting/400-error-aes256/) indique pourtant que cet en-tête peut être rejeté. Vérifiez l'écriture et le verrouillage lors de la création d'un autre backend; ne supposez pas ce comportement identique dans toute région.
 
