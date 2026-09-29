@@ -41,7 +41,7 @@ brew install hashicorp/tap/terraform
 scw login
 ```
 
-Terraform 1.11 ou plus récent est requis. Il faut aussi une API key Scaleway autorisée à gérer le projet (réseau, Kapsule, SFS, Object Storage, Secret Manager) et les ressources IAM de l'application Nextflow. En pratique, demandez les permission sets **AllProductsFullAccess** sur le projet dédié et **IAMApplicationManager** (ou **IAMManager**) pour créer l'application, sa clé et sa politique. Voir la [documentation IAM Scaleway](https://www.scaleway.com/en/docs/iam/credentials/create-api-keys/). L'opérateur doit pouvoir lire le secret de pipeline. Pour le premier déploiement, préparez un bucket S3 privé et versionné pour l'état Terraform, ainsi que ses identifiants S3 (AWS_ACCESS_KEY_ID et AWS_SECRET_ACCESS_KEY). Placez ce bucket dans un **projet Scaleway distinct** du projet Nextflow : l'identité du pipeline possède des droits Object Storage à l'échelle de son projet.
+Terraform 1.11 ou plus récent est requis. Il faut aussi une API key Scaleway autorisée à gérer le projet (réseau, Kapsule, SFS, Object Storage, Secret Manager) et les ressources IAM de l'application Nextflow. En pratique, demandez les permission sets **AllProductsFullAccess** sur le projet dédié et **IAMApplicationManager** (ou **IAMManager**) pour créer l'application, sa clé et sa politique. Voir la [documentation IAM Scaleway](https://www.scaleway.com/en/docs/iam/credentials/create-api-keys/). L'opérateur doit pouvoir lire le secret de pipeline. Utilisez le profil local créé par `scw login` pour le déploiement : si `SCW_SECRET_KEY` est exportée, `scw k8s kubeconfig install` l'inscrit dans le kubeconfig. Pour le premier déploiement, préparez un bucket S3 privé et versionné pour l'état Terraform, ainsi que ses identifiants S3 (AWS_ACCESS_KEY_ID et AWS_SECRET_ACCESS_KEY). Placez ce bucket dans un **projet Scaleway distinct** du projet Nextflow : l'identité du pipeline possède des droits Object Storage à l'échelle de son projet.
 
 Dans la console Scaleway, vérifiez les [quotas de l'organisation](https://www.scaleway.com/en/docs/organizations-and-projects/organization/organization-quotas/) et les disponibilités en fr-par-3 (et fr-par-2 pour le pool GEN3) : nœuds des types configurés, CPU/RAM, Kapsule, volumes SFS de 200 et 50 Go, buckets Object Storage et objets IAM/Secrets. Les quotas varient selon l'organisation; demandez leur augmentation avant le déploiement si nécessaire. Renseignez l'UUID de l'opérateur dans operator_user_id.
 
@@ -56,19 +56,26 @@ cp terraform/infra/terraform.tfvars.example terraform/infra/terraform.tfvars
 cp terraform/kubernetes/terraform.tfvars.example terraform/kubernetes/terraform.tfvars
 ```
 
-Dans les deux backend.hcl, mettez le nom du même bucket d'état. Dans terraform/infra/terraform.tfvars, indiquez le Project UUID cible et l'UUID utilisateur operator_user_id. Ajustez les types et tailles dans ce fichier si besoin. Ne commitez ni ces fichiers générés, ni vos clés. L'état Terraform infra contient la clé IAM du pipeline : limitez l'accès au bucket d'état et à ses anciennes versions. `STATE_PROJECT_ID` doit être l'UUID du projet d'état, différent de `scw_project_id`.
+Dans les deux backend.hcl, mettez le nom du même bucket d'état. Dans terraform/infra/terraform.tfvars, indiquez le Project UUID cible et l'UUID utilisateur operator_user_id. Ajustez les types et tailles dans ce fichier si besoin. Ne commitez ni ces fichiers générés, ni vos clés. L'état Terraform infra contient la clé IAM du pipeline : limitez l'accès au bucket d'état et à ses anciennes versions.
 
-Créez le bucket d'état avant le premier plan. Les identifiants S3 de ce bucket doivent être actifs dans le shell sous AWS_ACCESS_KEY_ID et AWS_SECRET_ACCESS_KEY :
+Un administrateur du projet d'état crée **une seule fois** son bucket privé et versionné, dans un projet différent de `scw_project_id` :
 
 ```bash
-make bootstrap-state STATE_BUCKET=mon-bucket-etat STATE_PROJECT_ID=project-uuid
+scw object bucket create mon-bucket-etat enable-versioning=true acl=private project-id=UUID_PROJET_ETAT region=fr-par
+```
+
+Chaque opérateur charge ses propres identifiants S3 autorisés sur ce bucket avant Terraform :
+
+```bash
+export AWS_ACCESS_KEY_ID="CLE_ETAT"
+export AWS_SECRET_ACCESS_KEY="SECRET_ETAT"
 ```
 
 Le premier plan vérifie l'infrastructure Scaleway. Examinez-le puis déployez :
 
 ```bash
 make plan
-make deploy STATE_BUCKET=mon-bucket-etat STATE_PROJECT_ID=project-uuid
+make deploy
 ```
 
 Le déploiement crée les buckets, le réseau, Kapsule, les pools, SFS, l'identité de pipeline, le namespace, les PVC et le secret Kubernetes. Terraform affiche et demande confirmation pour chacun des deux plans, infrastructure puis Kubernetes.
