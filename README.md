@@ -95,27 +95,26 @@ sample,fastq_1,fastq_2,strandedness
 patient_001,s3://BUCKET/validation/synthetic-001/patient_001_R1.fastq.gz,s3://BUCKET/validation/synthetic-001/patient_001_R2.fastq.gz,unstranded
 ```
 
-Récupérez le nom du bucket avec make outputs. Pour utiliser AWS CLI, chargez la clé de l'application depuis Secret Manager :
+Récupérez le nom du bucket avec `make outputs`. Pour les uploads, utilisez les identifiants de l'application dans un sous-shell : les identifiants du state restent ainsi actifs pour `make run`.
 
 ```bash
 SECRET_ID=$(terraform -chdir=terraform/infra output -raw pipeline_credentials_secret_id)
 SECRET_REVISION=$(terraform -chdir=terraform/infra output -raw pipeline_credentials_revision)
+(
+set -e
 SECRET=$(scw secret version access "$SECRET_ID" revision="$SECRET_REVISION" region=fr-par raw=true)
-export AWS_ACCESS_KEY_ID=$(jq -er '.access_key' <<<"$SECRET")
-export AWS_SECRET_ACCESS_KEY=$(jq -er '.secret_key' <<<"$SECRET")
+AWS_ACCESS_KEY_ID=$(jq -er '.access_key' <<<"$SECRET")
+AWS_SECRET_ACCESS_KEY=$(jq -er '.secret_key' <<<"$SECRET")
+export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
 export AWS_DEFAULT_REGION=fr-par
 unset SECRET
-```
-
-Déposez les FASTQ et le CSV avec l'endpoint https://s3.fr-par.scw.cloud. La policy de l'application autorise l'écriture sous validation/. Exemple, après avoir remplacé BUCKET par le résultat de make outputs :
-
-```bash
 aws --endpoint-url https://s3.fr-par.scw.cloud s3 cp patient_001_R1.fastq.gz s3://BUCKET/validation/synthetic-001/
 aws --endpoint-url https://s3.fr-par.scw.cloud s3 cp patient_001_R2.fastq.gz s3://BUCKET/validation/synthetic-001/
 aws --endpoint-url https://s3.fr-par.scw.cloud s3 cp samplesheet.csv s3://BUCKET/validation/synthetic-001/
+)
 ```
 
-Vous pouvez aussi utiliser la console Object Storage. Lancez ensuite :
+Remplacez `BUCKET` par le nom du bucket d'entrée. La policy de l'application autorise l'écriture sous `validation/`. Vous pouvez aussi utiliser la console Object Storage. Lancez ensuite :
 
 ```bash
 make run RUN_ID=synthetic-001 INPUT=s3://BUCKET/validation/synthetic-001/samplesheet.csv
