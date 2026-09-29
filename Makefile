@@ -10,10 +10,10 @@ STATE_REGION ?= fr-par
 RUN_ID ?=
 INPUT ?=
 OUTDIR ?=
-SAMPLES ?= 1
 RESUME ?= 0
 AUTO_APPROVE ?= 0
 SAVE_ALIGN_INTERMEDS ?= false
+GEN3_SCRATCH_BENCHMARK ?= 0
 NF_ARGS ?=
 
 APPLY_FLAG := $(if $(filter 1 true,$(AUTO_APPROVE)),-auto-approve,)
@@ -22,8 +22,7 @@ export KUBECONFIG
 
 .PHONY: help bootstrap-state init infra-init infra-plan infra-apply kubeconfig platform-init platform-plan \
 	platform-apply sync-secret cluster plan fmt validate shell-syntax status outputs \
-	bootstrap-reference prepare-demo run-pipeline validate-run smoke-test \
-	destroy deploy demo run
+	bootstrap-reference run-pipeline destroy deploy run
 
 help: ## List available workflows
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z0-9_-]+:.*##/ {printf "\033[36m%-24s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -116,40 +115,23 @@ status: ## Show cluster nodes and Nextflow jobs
 bootstrap-reference:
 	bash $(SCRIPTS_DIR)/bootstrap-reference.sh
 
-prepare-demo:
-	@test -n "$(RUN_ID)" || { echo 'Set RUN_ID, e.g. make prepare-demo RUN_ID=validation-20260925'; exit 2; }
-	bash $(SCRIPTS_DIR)/prepare-demo.sh "$(RUN_ID)" "$(SAMPLES)"
-
 run-pipeline:
-	@test -n "$(RUN_ID)" || { echo 'Set RUN_ID, e.g. make run-pipeline RUN_ID=validation-20260925'; exit 2; }
+	@test -n "$(RUN_ID)" || { echo 'Set RUN_ID to a unique run name.'; exit 2; }
 	@if [ "$(RESUME)" = 1 ]; then \
-	  bash $(SCRIPTS_DIR)/run-pipeline.sh "$(RUN_ID)" $(if $(INPUT),--input "$(INPUT)",) $(if $(OUTDIR),--outdir "$(OUTDIR)",) --resume -- --save_align_intermeds $(SAVE_ALIGN_INTERMEDS) $(NF_ARGS); \
+	  bash $(SCRIPTS_DIR)/run-pipeline.sh "$(RUN_ID)" $(if $(INPUT),--input "$(INPUT)",) $(if $(OUTDIR),--outdir "$(OUTDIR)",) $(if $(filter 1 true,$(GEN3_SCRATCH_BENCHMARK)),--gen3-scratch-benchmark,) --resume -- --save_align_intermeds $(SAVE_ALIGN_INTERMEDS) $(NF_ARGS); \
 	else \
-	  bash $(SCRIPTS_DIR)/run-pipeline.sh "$(RUN_ID)" $(if $(INPUT),--input "$(INPUT)",) $(if $(OUTDIR),--outdir "$(OUTDIR)",) -- --save_align_intermeds $(SAVE_ALIGN_INTERMEDS) $(NF_ARGS); \
+	  bash $(SCRIPTS_DIR)/run-pipeline.sh "$(RUN_ID)" $(if $(INPUT),--input "$(INPUT)",) $(if $(OUTDIR),--outdir "$(OUTDIR)",) $(if $(filter 1 true,$(GEN3_SCRATCH_BENCHMARK)),--gen3-scratch-benchmark,) -- --save_align_intermeds $(SAVE_ALIGN_INTERMEDS) $(NF_ARGS); \
 	fi
-
-validate-run:
-	@test -n "$(RUN_ID)" || { echo 'Set RUN_ID, e.g. make validate-run RUN_ID=validation-20260925'; exit 2; }
-	bash $(SCRIPTS_DIR)/validate-run.sh "$(RUN_ID)"
-
-smoke-test:
-	@test -n "$(RUN_ID)" || { echo 'Set RUN_ID, e.g. make smoke-test RUN_ID=validation-20260925'; exit 2; }
-	$(MAKE) bootstrap-reference
-	@if [ "$(RESUME)" != 1 ]; then $(MAKE) prepare-demo RUN_ID="$(RUN_ID)" SAMPLES="$(SAMPLES)"; fi
-	$(MAKE) run-pipeline RUN_ID="$(RUN_ID)" RESUME="$(RESUME)" SAVE_ALIGN_INTERMEDS=true
-	$(MAKE) validate-run RUN_ID="$(RUN_ID)"
 
 deploy: ## Create the cluster and install the Nextflow platform
 	@test -n "$(STATE_BUCKET)" || { echo 'Set STATE_BUCKET to a unique S3 bucket name.'; exit 2; }
 	$(MAKE) cluster STATE_BUCKET="$(STATE_BUCKET)" STATE_PROJECT_ID="$(STATE_PROJECT_ID)" STATE_REGION="$(STATE_REGION)" AUTO_APPROVE="$(AUTO_APPROVE)"
 
-demo: ## Run and validate the small RNA-seq example (set RUN_ID; SAMPLES may be >1 for load testing)
-	$(MAKE) smoke-test RUN_ID="$(RUN_ID)" RESUME="$(RESUME)" SAMPLES="$(SAMPLES)"
-
-run: ## Run a samplesheet already stored in Object Storage (set RUN_ID and INPUT)
+run: ## Run a synthetic or real samplesheet already stored in Object Storage
 	@test -n "$(RUN_ID)" || { echo 'Set RUN_ID to a unique run name.'; exit 2; }
 	@test -n "$(INPUT)" || { echo 'Set INPUT to s3://bucket/path/samplesheet.csv.'; exit 2; }
-	$(MAKE) run-pipeline RUN_ID="$(RUN_ID)" INPUT="$(INPUT)" OUTDIR="$(OUTDIR)" RESUME="$(RESUME)" SAVE_ALIGN_INTERMEDS="$(SAVE_ALIGN_INTERMEDS)" NF_ARGS="$(NF_ARGS)"
+	$(MAKE) bootstrap-reference
+	$(MAKE) run-pipeline RUN_ID="$(RUN_ID)" INPUT="$(INPUT)" OUTDIR="$(OUTDIR)" RESUME="$(RESUME)" SAVE_ALIGN_INTERMEDS="$(SAVE_ALIGN_INTERMEDS)" GEN3_SCRATCH_BENCHMARK="$(GEN3_SCRATCH_BENCHMARK)" NF_ARGS="$(NF_ARGS)"
 
 destroy: ## Destroy Kubernetes and Scaleway resources (interactive)
 	$(TF) -chdir=$(K8S_DIR) destroy -input=false -var-file=terraform.tfvars $(KUBECONFIG_ARG)

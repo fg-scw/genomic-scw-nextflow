@@ -98,10 +98,6 @@ require_kubernetes_platform() {
     || fail "Secret pipeline-s3-credentials is missing one or more required keys."
 }
 
-s3_input_uri() {
-  printf 's3://%s/validation/%s/samplesheet.csv' "$INPUT_BUCKET" "$1"
-}
-
 s3_output_uri() {
   printf 's3://%s/runs/%s' "$RESULTS_BUCKET" "$1"
 }

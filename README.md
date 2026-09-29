@@ -73,27 +73,15 @@ make deploy STATE_BUCKET=mon-bucket-etat STATE_PROJECT_ID=project-uuid
 
 Le déploiement crée les buckets, le réseau, Kapsule, les pools, SFS, l'identité de pipeline, le namespace, les PVC et le secret Kubernetes. Terraform demande confirmation. Pour automatiser après revue du plan : make deploy STATE_BUCKET=mon-bucket-etat STATE_PROJECT_ID=project-uuid AUTO_APPROVE=1.
 
-## Tester avec une charge de démonstration
+## Lancer un run synthétique, puis vos données
 
-```bash
-make demo RUN_ID=demo-001
-```
+Le dépôt ne génère pas de FASTQ. Utilisez un jeu synthétique fourni par votre équipe ou votre outil de simulation, puis répétez les étapes avec les échantillons réels. Chaque run a son propre identifiant et son propre préfixe S3.
 
-Le dépôt télécharge 50 000 paires SRR1039508, prépare GRCh38 si nécessaire, lance le pipeline puis contrôle le BAM, les comptes et MultiQC. Pour augmenter le nombre de tâches et solliciter l'autoscaler :
-
-```bash
-make demo RUN_ID=charge-001 SAMPLES=20
-```
-
-Ce test répète le même petit FASTQ sous plusieurs noms d'échantillons (de 1 à 100) : il mesure le parcours Kubernetes/Nextflow, pas le débit d'un vrai lot ni la validité biologique. validate-run contrôle le premier échantillon; le Job doit terminer pour que le lot soit complet.
-
-## Lancer vos données
-
-Préparez une samplesheet nf-core/rnaseq et déposez la samplesheet et les FASTQ dans le bucket d'entrée, sous validation/<run-id>/. Le CSV doit référencer les FASTQ par URI s3:// :
+Préparez une samplesheet nf-core/rnaseq et déposez-la avec les FASTQ dans le bucket d'entrée, sous validation/<run-id>/. Le CSV doit référencer les FASTQ par URI s3:// :
 
 ```csv
 sample,fastq_1,fastq_2,strandedness
-patient_001,s3://BUCKET/validation/run-001/patient_001_R1.fastq.gz,s3://BUCKET/validation/run-001/patient_001_R2.fastq.gz,unstranded
+patient_001,s3://BUCKET/validation/synthetic-001/patient_001_R1.fastq.gz,s3://BUCKET/validation/synthetic-001/patient_001_R2.fastq.gz,unstranded
 ```
 
 Récupérez le nom du bucket avec make outputs. Pour utiliser AWS CLI, chargez la clé de l'application depuis Secret Manager :
@@ -111,23 +99,29 @@ unset SECRET
 Déposez les FASTQ et le CSV avec l'endpoint https://s3.fr-par.scw.cloud. La policy de l'application autorise l'écriture sous validation/. Exemple, après avoir remplacé BUCKET par le résultat de make outputs :
 
 ```bash
-aws --endpoint-url https://s3.fr-par.scw.cloud s3 cp patient_001_R1.fastq.gz s3://BUCKET/validation/run-001/
-aws --endpoint-url https://s3.fr-par.scw.cloud s3 cp patient_001_R2.fastq.gz s3://BUCKET/validation/run-001/
-aws --endpoint-url https://s3.fr-par.scw.cloud s3 cp samplesheet.csv s3://BUCKET/validation/run-001/
+aws --endpoint-url https://s3.fr-par.scw.cloud s3 cp patient_001_R1.fastq.gz s3://BUCKET/validation/synthetic-001/
+aws --endpoint-url https://s3.fr-par.scw.cloud s3 cp patient_001_R2.fastq.gz s3://BUCKET/validation/synthetic-001/
+aws --endpoint-url https://s3.fr-par.scw.cloud s3 cp samplesheet.csv s3://BUCKET/validation/synthetic-001/
 ```
 
 Vous pouvez aussi utiliser la console Object Storage. Lancez ensuite :
 
 ```bash
-make run RUN_ID=run-001 INPUT=s3://BUCKET/validation/run-001/samplesheet.csv
+make run RUN_ID=synthetic-001 INPUT=s3://BUCKET/validation/synthetic-001/samplesheet.csv
+```
+
+make run vérifie la référence GRCh38 sur SFS (et l'installe si nécessaire), puis attend la fin du pipeline. La commande échoue si Nextflow retourne une erreur. Contrôlez le rapport MultiQC et les fichiers de sortie, puis lancez les données réelles avec une nouvelle samplesheet :
+
+```bash
+make run RUN_ID=real-001 INPUT=s3://BUCKET/validation/real-001/samplesheet.csv
 ```
 
 Les ressources par processus se règlent dans nextflow/nextflow.config; les paramètres, notamment la référence, dans nextflow/params.yaml. Pour reprendre un run échoué, vérifiez ses entrées et son workdir SFS puis gardez le même identifiant :
 
 ```bash
-make run RUN_ID=run-001 INPUT=s3://BUCKET/validation/run-001/samplesheet.csv RESUME=1
+make run RUN_ID=synthetic-001 INPUT=s3://BUCKET/validation/synthetic-001/samplesheet.csv RESUME=1
 make status
-kubectl logs -n bioinformatics -f job/nextflow-run-001
+kubectl logs -n bioinformatics -f job/nextflow-synthetic-001
 ```
 
 Par défaut, les BAM intermédiaires ne sont pas conservés pour limiter stockage et transferts. Pour les garder, ajoutez SAVE_ALIGN_INTERMEDS=true à make run.
@@ -135,8 +129,7 @@ Par défaut, les BAM intermédiaires ne sont pas conservés pour limiter stockag
 Pour tester les pods STAR sur le pool MEMORY3 et son NVMe /scratch, après avoir vérifié le montage du nouveau nœud :
 
 ```bash
-make prepare-demo RUN_ID=gen3-001
-bash scripts/run-pipeline.sh gen3-001 --gen3-scratch-benchmark
+make run RUN_ID=scratch-001 INPUT=s3://BUCKET/validation/scratch-001/samplesheet.csv GEN3_SCRATCH_BENCHMARK=1
 ```
 
 ## Nettoyage et limites
