@@ -52,6 +52,31 @@ Le diagramme correspond au profil GEN3 du test. Avec `scaleway_kapsule` seul, ST
 | **S3 — données** | Buckets hors du cluster : FASTQ, samplesheet et résultats | Entrées au lancement et au staging; publication des BAM, quantifications et MultiQC après les tâches. Les résultats restent disponibles après retrait des workers. |
 | **S3 — état Terraform** | Bucket séparé, hors du cluster | Pendant les commandes Terraform : état partagé et verrou. Sans rôle dans le calcul Nextflow. |
 
+### Workflow et circulation des données
+
+```mermaid
+sequenceDiagram
+  participant S3 as S3 hors cluster
+  box Cluster Kapsule — workers
+    participant P as POP2 / Nextflow et QC
+    participant G as GEN3 / STAR
+  end
+  participant F as File Storage partagé
+
+  Note over P,G: Chaque worker possède son disque système<br/>Block Storage
+  S3->>P: Samplesheet et FASTQ
+  P->>G: Lancer l’indexation STAR
+  F->>G: Référence FASTA/GTF
+  Note over G: Calcul et fichiers temporaires<br/>sur NVMe /scratch
+  G->>F: Conserver l’index produit
+  P->>G: Lancer l’alignement STAR
+  F->>G: Lire l’index et les entrées
+  Note over G: Fichiers temporaires sur NVMe
+  G->>F: Conserver les sorties STAR
+  F->>P: Sorties pour Salmon et QC
+  P->>S3: Publier BAM, quantifications et MultiQC
+```
+
 ## Prérequis
 
 - Un projet Scaleway dédié et un bucket privé/versionné pour le state, dans un **autre projet**.
