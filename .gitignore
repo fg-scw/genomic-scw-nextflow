@@ -16,6 +16,9 @@ crash.*.log
 *.kubeconfig
 kubeconfig
 
+# Per-run Kubernetes configuration
+kubernetes/run/run.env
+
 # Nextflow work and run output
 work/
 .nextflow/

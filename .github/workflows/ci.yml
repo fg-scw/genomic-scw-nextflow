@@ -39,7 +39,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for script in scripts/*.sh; do
+          for script in scripts/*.sh kubernetes/base/*.sh; do
             bash -n "$script"
           done
 
@@ -47,6 +47,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for test in tests/run-pipeline-*.sh; do
+          for test in tests/*.sh; do
             bash "$test"
           done

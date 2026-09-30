@@ -1,0 +1,40 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: reference-bootstrap-ensembl-110
+  namespace: bioinformatics
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 21600
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      nodeSelector:
+        k8s.scaleway.com/pool-name: orchestrator
+      containers:
+        - name: install-reference
+          image: alpine:3.22.1
+          command: ["/bin/sh", "-euc"]
+          args:
+            - apk add --no-cache curl coreutils && exec /bin/sh /config/reference.sh install /data/reference/GRCh38/Ensembl-110
+          volumeMounts:
+            - name: reference
+              mountPath: /data/reference
+            - name: installer
+              mountPath: /config
+              readOnly: true
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: reference
+          persistentVolumeClaim:
+            claimName: nf-reference-pvc
+        - name: installer
+          configMap:
+            name: nextflow-run-config

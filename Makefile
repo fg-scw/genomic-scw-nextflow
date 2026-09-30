@@ -1,26 +1,16 @@
 TF := terraform
 INFRA_DIR := terraform/infra
 K8S_DIR := terraform/kubernetes
-SCRIPTS_DIR := scripts
 NAMESPACE ?= bioinformatics
 KUBECONFIG ?= $(HOME)/.kube/config-hcl-public-netflow
-RUN_ID ?=
-INPUT ?=
-OUTDIR ?=
-RESUME ?= 0
-SAVE_ALIGN_INTERMEDS ?= false
-GEN3_SCRATCH_BENCHMARK ?= 0
-NF_ARGS ?=
-
 KUBECONFIG_ARG := -var="kubeconfig_path=$(KUBECONFIG)"
 export KUBECONFIG
 
 .PHONY: help infra-init infra-plan infra-apply kubeconfig platform-init platform-plan \
-	platform-apply sync-secret plan fmt validate shell-syntax status outputs \
-	bootstrap-reference run-pipeline destroy deploy run
+	platform-apply sync-secret plan outputs fmt validate shell-syntax status reference run deploy destroy
 
 help: ## List available workflows
-	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z0-9_-]+:.*##/ {printf "\033[36m%-24s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z0-9_-]+:.*##/ {printf "\033[36m%-16s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 infra-init:
 	$(TF) -chdir=$(INFRA_DIR) init -input=false -backend-config=backend.hcl
@@ -48,7 +38,7 @@ platform-apply: platform-init
 	$(TF) -chdir=$(K8S_DIR) apply -var-file=terraform.tfvars $(KUBECONFIG_ARG)
 
 sync-secret:
-	bash $(SCRIPTS_DIR)/sync-k8s-secret.sh
+	bash scripts/sync-k8s-secret.sh
 
 plan: ## Review the infrastructure plan
 	$(MAKE) infra-plan
@@ -66,31 +56,24 @@ validate:
 	done
 
 shell-syntax:
-	@set -eu; for script in $(SCRIPTS_DIR)/*.sh; do bash -n "$$script"; done
+	@set -eu; for script in scripts/*.sh kubernetes/base/*.sh; do bash -n "$$script"; done
 
-status: ## Show cluster nodes and Nextflow jobs
+status: ## Show cluster nodes, volumes and jobs
 	kubectl get nodes -o wide
 	kubectl get pvc -n $(NAMESPACE)
 	kubectl get jobs,pods -n $(NAMESPACE) -o wide
 
-bootstrap-reference:
-	bash $(SCRIPTS_DIR)/bootstrap-reference.sh
+reference: ## Start the reference installation job
+	kubectl apply -k kubernetes/reference
 
-run-pipeline:
-	@test -n "$(RUN_ID)" || { echo 'Set RUN_ID to a unique run name.'; exit 2; }
-	bash $(SCRIPTS_DIR)/run-pipeline.sh "$(RUN_ID)" $(if $(INPUT),--input "$(INPUT)",) $(if $(OUTDIR),--outdir "$(OUTDIR)",) $(if $(filter 1 true,$(GEN3_SCRATCH_BENCHMARK)),--gen3-scratch-benchmark,) $(if $(filter 1 true,$(RESUME)),--resume,) -- --save_align_intermeds $(SAVE_ALIGN_INTERMEDS) $(NF_ARGS)
+run: ## Start the Nextflow job configured in kubernetes/run/run.env
+	kubectl apply -k kubernetes/run
 
 deploy: ## Create the cluster and install the Nextflow platform
 	$(MAKE) infra-apply
 	$(MAKE) kubeconfig
 	$(MAKE) platform-apply
 	$(MAKE) sync-secret
-
-run: ## Run a synthetic or real samplesheet already stored in Object Storage
-	@test -n "$(RUN_ID)" || { echo 'Set RUN_ID to a unique run name.'; exit 2; }
-	@test -n "$(INPUT)" || { echo 'Set INPUT to s3://bucket/path/samplesheet.csv.'; exit 2; }
-	$(MAKE) bootstrap-reference
-	$(MAKE) run-pipeline RUN_ID="$(RUN_ID)" INPUT="$(INPUT)" OUTDIR="$(OUTDIR)" RESUME="$(RESUME)" SAVE_ALIGN_INTERMEDS="$(SAVE_ALIGN_INTERMEDS)" GEN3_SCRATCH_BENCHMARK="$(GEN3_SCRATCH_BENCHMARK)" NF_ARGS="$(NF_ARGS)"
 
 destroy: ## Destroy Kubernetes and Scaleway resources (interactive)
 	$(TF) -chdir=$(K8S_DIR) destroy -var-file=terraform.tfvars $(KUBECONFIG_ARG)

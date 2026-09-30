@@ -9,7 +9,7 @@ awk -v quote="'''" '
   index($0, "beforeScript = " quote) { inside=1; next }
   inside && index($0, quote) { exit }
   inside { print }
-' "$repo_root/nextflow/nextflow.config" > "$tmp/guard.sh"
+' "$repo_root/kubernetes/base/nextflow.config" > "$tmp/guard.sh"
 [[ -s "$tmp/guard.sh" ]]
 mkdir "$tmp/scratch"
 sed -e "s|/proc/mounts|${tmp}/mounts|" -e "s|/scratch|${tmp}/scratch|g" \

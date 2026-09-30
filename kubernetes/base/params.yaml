@@ -1,6 +1,6 @@
 # Pipeline pin: nf-core/rnaseq 3.14.0 (kept for POC compatibility).
 # Upgrade only after a representative Kapsule run validates the new release.
-# Input and output are supplied explicitly by run-pipeline.sh for each run.
+# Input and output are supplied by kubernetes/run/run.env for each run.
 
 max_cpus: 7
 max_memory: '56.GB'

@@ -18,7 +18,9 @@ flowchart LR
     HEAD --> STAR
   end
   ORCH --> REFVOL[("SFS référence<br/>GRCh38")]
+  REFVOL --> HEAD
   REFVOL --> STAR
+  BLOCK[("Block Storage<br/>disques système des nœuds")] --- K
   S3IN -->|FASTQ| STAR
   WORK[("SFS workdir<br/>cache et reprise")] <--> HEAD
   WORK <--> STAR
@@ -78,6 +80,7 @@ export AWS_SECRET_ACCESS_KEY="SECRET_ETAT"
 Le premier plan vérifie l'infrastructure Scaleway. Examinez-le puis déployez :
 
 ```bash
+export KUBECONFIG="$HOME/.kube/config-hcl-public-netflow"
 make plan
 make deploy
 ```
@@ -88,25 +91,25 @@ Le déploiement crée les buckets, le réseau, Kapsule, les pools, SFS, l'identi
 
 Le dépôt ne génère pas de FASTQ. Utilisez un jeu synthétique fourni par votre équipe ou votre outil de simulation, puis répétez les étapes avec les échantillons réels. Chaque run a son propre identifiant et son propre préfixe S3.
 
-Préparez une samplesheet nf-core/rnaseq et déposez-la avec les FASTQ dans le bucket d'entrée, sous validation/<run-id>/. Le CSV doit référencer les FASTQ par URI s3:// :
+Préparez une samplesheet nf-core/rnaseq et déposez-la avec les FASTQ dans le bucket d'entrée, sous `validation/<run-id>/`. Le CSV doit référencer les FASTQ par URI `s3://` :
 
 ```csv
 sample,fastq_1,fastq_2,strandedness
 patient_001,s3://BUCKET/validation/synthetic-001/patient_001_R1.fastq.gz,s3://BUCKET/validation/synthetic-001/patient_001_R2.fastq.gz,unstranded
 ```
 
-Récupérez le nom du bucket avec `make outputs`. Pour les uploads, utilisez les identifiants de l'application dans un sous-shell : les identifiants du state restent ainsi actifs pour `make run`.
+Récupérez le nom du bucket avec `make outputs`. Pour les uploads, utilisez les identifiants de l'application dans un sous-shell : les identifiants du state restent ainsi actifs pour les commandes Terraform.
 
 ```bash
 SECRET_ID=$(terraform -chdir=terraform/infra output -raw pipeline_credentials_secret_id)
+SECRET_ID=${SECRET_ID##*/}
 SECRET_REVISION=$(terraform -chdir=terraform/infra output -raw pipeline_credentials_revision)
 (
 set -e
 SECRET=$(scw secret version access "$SECRET_ID" revision="$SECRET_REVISION" region=fr-par raw=true)
 AWS_ACCESS_KEY_ID=$(jq -er '.access_key' <<<"$SECRET")
 AWS_SECRET_ACCESS_KEY=$(jq -er '.secret_key' <<<"$SECRET")
-export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
-export AWS_DEFAULT_REGION=fr-par
+export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION=fr-par
 unset SECRET
 aws --endpoint-url https://s3.fr-par.scw.cloud s3 cp patient_001_R1.fastq.gz s3://BUCKET/validation/synthetic-001/
 aws --endpoint-url https://s3.fr-par.scw.cloud s3 cp patient_001_R2.fastq.gz s3://BUCKET/validation/synthetic-001/
@@ -114,33 +117,63 @@ aws --endpoint-url https://s3.fr-par.scw.cloud s3 cp samplesheet.csv s3://BUCKET
 )
 ```
 
-Remplacez `BUCKET` par le nom du bucket d'entrée. La policy de l'application autorise l'écriture sous `validation/`. Vous pouvez aussi utiliser la console Object Storage. Lancez ensuite :
+Remplacez `BUCKET` par le nom du bucket d'entrée. La policy de l'application autorise l'écriture sous `validation/`. Vous pouvez aussi utiliser la console Object Storage.
+
+Installez la référence une fois depuis un terminal opérateur. La création du Job ne bloque pas; attendez sa fin avant de lancer le run. Le Job s'exécute sur le pool orchestrator :
 
 ```bash
-make run RUN_ID=synthetic-001 INPUT=s3://BUCKET/validation/synthetic-001/samplesheet.csv
+make reference
+kubectl wait -n bioinformatics --for=condition=complete job/reference-bootstrap-ensembl-110 --timeout=6h
 ```
 
-make run vérifie la référence GRCh38 sur SFS (et l'installe si nécessaire), puis attend la fin du pipeline. La commande échoue si Nextflow retourne une erreur. Contrôlez le rapport MultiQC et les fichiers de sortie, puis lancez les données réelles avec une nouvelle samplesheet :
+`make reference` applique la configuration de façon idempotente quand elle n'a pas changé. Si une modification de configuration échoue parce que le template du Job est immuable, vérifiez que le Job est `Failed` ou `Complete`, supprimez-le, puis réappliquez. Ne supprimez jamais un Job actif :
 
 ```bash
-make run RUN_ID=real-001 INPUT=s3://BUCKET/validation/real-001/samplesheet.csv
+kubectl get job -n bioinformatics reference-bootstrap-ensembl-110
+# Seulement si la condition du Job est Failed ou Complete :
+kubectl delete job -n bioinformatics reference-bootstrap-ensembl-110
+make reference
 ```
 
-Les ressources par processus se règlent dans nextflow/nextflow.config; les paramètres, notamment la référence, dans nextflow/params.yaml. Pour reprendre un run échoué, vérifiez ses entrées et son workdir SFS puis gardez le même identifiant :
+Chaque lancement utilise une configuration locale rendue en ConfigMap propre au run. Copiez le modèle, puis renseignez `RUN_ID`, `INPUT`, `OUTDIR`, `RUN_RESUME=0`, `NF_PROFILE=scaleway_kapsule` et `AWS_DEFAULT_REGION=fr-par` dans `kubernetes/run/run.env` :
 
 ```bash
-make run RUN_ID=synthetic-001 INPUT=s3://BUCKET/validation/synthetic-001/samplesheet.csv RESUME=1
-make status
+cp kubernetes/run/run.env.example kubernetes/run/run.env
+```
+
+`OUTDIR` est le préfixe de sortie S3, par exemple `s3://BUCKET/runs/synthetic-001`. Kustomize génère un ConfigMap suffixé par le hash de la configuration (fichiers et `run.env`); ces ConfigMaps restent présents après le run. Supprimez-les explicitement quand ils ne servent plus, après avoir vérifié qu’aucun Job ne les utilise. `make run` applique le Job sans attendre sa fin :
+
+```bash
+make run
+kubectl get job -n bioinformatics "nextflow-synthetic-001"
 kubectl logs -n bioinformatics -f job/nextflow-synthetic-001
 ```
 
-Par défaut, les BAM intermédiaires ne sont pas conservés pour limiter stockage et transferts. Pour les garder, ajoutez SAVE_ALIGN_INTERMEDS=true à make run.
+Le Job head s'exécute sur `star-compute`; son init container vérifie la référence GRCh38 Ensembl 110 sur SFS avant que Nextflow démarre. Le contrôle de référence compare le manifeste et les tailles en lecture seule, sans relire les fichiers pour calculer leur SHA; il se répète à chaque run; si la référence manque, le Job échoue avant Nextflow. Contrôlez le rapport MultiQC et les sorties. Pour les données réelles, versez une nouvelle samplesheet et les FASTQ dans un préfixe dédié, modifiez les valeurs de `run.env`, puis lancez `make run` à nouveau.
 
-Pour tester les pods STAR sur le pool MEMORY3 et son NVMe /scratch, après avoir vérifié le montage du nouveau nœud :
+Les ressources par processus se règlent dans `kubernetes/base/nextflow.config`; les paramètres, notamment la référence, dans `kubernetes/base/params.yaml`. Pour reprendre un run échoué, gardez le même `RUN_ID`, vérifiez que le Job est en état terminal (`Failed` ou `Complete`) et contrôlez le workdir SFS. Mettez `RUN_RESUME=1` dans `run.env`, supprimez explicitement l’ancien Job terminal, puis appliquez la configuration. Ne supprimez pas un Job actif : sa suppression interrompt le pipeline. Le nom du Job reste `nextflow-<RUN_ID>` et un Job Kubernetes ne peut pas être modifié en place; le ConfigMap hashé permet de publier la nouvelle configuration de reprise sous un nom distinct.
 
 ```bash
-make run RUN_ID=scratch-001 INPUT=s3://BUCKET/validation/scratch-001/samplesheet.csv GEN3_SCRATCH_BENCHMARK=1
+kubectl get job -n bioinformatics "nextflow-$RUN_ID"
+# Seulement si la condition du Job est Failed ou Complete :
+kubectl delete job -n bioinformatics "nextflow-$RUN_ID"
+kubectl apply -k kubernetes/run
 ```
+
+Le runner conserve et utilise l'UUID de session Nextflow du run pour `-resume`; il ne choisit pas une session globale récente. Par défaut, les BAM intermédiaires ne sont pas conservés. Le profil `scaleway_kapsule` est celui du run standard. Pour le test NVMe, réglez `NF_PROFILE=scaleway_kapsule,gen3_scratch_benchmark` dans `run.env`. Ce profil reste un essai opt-in, limité au pool GEN3 `gen3-probe` en `fr-par-2`; les pods STAR gardent leur contrôle par pod du montage `/scratch`. Les pools portent le tag `scw-create-scratch-volume`, qui ne fournit un volume que sur les nouveaux nœuds compatibles.
+
+## Vérification du lancement simplifié — 30 septembre 2026
+
+Les deux plans Terraform avec refresh et verrou S3 ne prévoient aucun changement sur l'infrastructure existante. Les quatre tests locaux, les validations Terraform et la validation des manifests par l'API Kubernetes passent. Le parcours utilise trois scripts applicatifs (272 lignes, contre six et 656 auparavant) : synchronisation du secret, installation/contrôle de la référence, conservation de la session Nextflow. Les Jobs sont déclarés en YAML; `make` est un raccourci pour les commandes natives.
+
+| Heure UTC | Étape | Résultat | Pool |
+| --- | --- | --- | --- |
+| 08:25:10–08:25:22 | Job référence avec les nouveaux manifests | Référence SFS existante vérifiée, sans téléchargement | orchestrator |
+| 08:26:18 | `make run`, puis seconde application identique | Même UID de Job conservé, sans redémarrage | star-compute |
+| 08:27:55 | Init container du head | Référence vérifiée, code de sortie 0 | star-compute |
+| 08:27:57 | Démarrage du conteneur Nextflow | Run `smoke-native-20260930` en cours | star-compute |
+
+Ce run reprend le même jeu ENA de 50 000 paires décrit ci-dessous, avec `NF_PROFILE=scaleway_kapsule,gen3_scratch_benchmark`. Le pool GEN3 doit être créé à la demande par les tâches STAR; leur garde `/scratch` doit réussir avant le calcul. Le démarrage est validé, le résultat complet reste à vérifier. Fermer le terminal ne suspend pas le Job; les contrôles peuvent être espacés de 30 minutes avec `kubectl get job` et `kubectl logs`.
 
 ## Essai observé le 29 septembre 2026
 
@@ -179,7 +212,15 @@ make plan
 make deploy
 INPUT_BUCKET=$(terraform -chdir=terraform/infra output -raw input_bucket_name)
 RUN_ID="smoke-$(date -u +%Y%m%d-%H%M)"
-make run RUN_ID="$RUN_ID" INPUT="s3://$INPUT_BUCKET/validation/validation-20260925/samplesheet.csv"
+cat > kubernetes/run/run.env <<EOF
+RUN_ID=$RUN_ID
+INPUT=s3://$INPUT_BUCKET/validation/validation-20260925/samplesheet.csv
+OUTDIR=s3://$(terraform -chdir=terraform/infra output -raw results_bucket_name)/runs/$RUN_ID
+RUN_RESUME=0
+NF_PROFILE=scaleway_kapsule
+AWS_DEFAULT_REGION=fr-par
+EOF
+make run
 kubectl get job -n bioinformatics "nextflow-$RUN_ID"
 kubectl logs -n bioinformatics "job/nextflow-$RUN_ID" | tail -n 3
 ```
@@ -202,6 +243,7 @@ PREFIX=validation/ena-50k
 printf 'sample,fastq_1,fastq_2,strandedness\nSRR1039508,s3://%s/%s/SRR1039508_1.fastq.gz,s3://%s/%s/SRR1039508_2.fastq.gz,unstranded\n' \
   "$INPUT_BUCKET" "$PREFIX" "$INPUT_BUCKET" "$PREFIX" > samplesheet.csv
 SECRET_ID=$(terraform -chdir=terraform/infra output -raw pipeline_credentials_secret_id)
+SECRET_ID=${SECRET_ID##*/}
 SECRET_REVISION=$(terraform -chdir=terraform/infra output -raw pipeline_credentials_revision)
 (
   set -e
@@ -215,10 +257,18 @@ SECRET_REVISION=$(terraform -chdir=terraform/infra output -raw pipeline_credenti
   done
 )
 RUN_ID="smoke-$(date -u +%Y%m%d-%H%M)"
-make run RUN_ID="$RUN_ID" INPUT="s3://$INPUT_BUCKET/$PREFIX/samplesheet.csv"
+cat > kubernetes/run/run.env <<EOF
+RUN_ID=$RUN_ID
+INPUT=s3://$INPUT_BUCKET/$PREFIX/samplesheet.csv
+OUTDIR=s3://$(terraform -chdir=terraform/infra output -raw results_bucket_name)/runs/$RUN_ID
+RUN_RESUME=0
+NF_PROFILE=scaleway_kapsule
+AWS_DEFAULT_REGION=fr-par
+EOF
+make run
 ```
 
-Si le terminal perd la connexion pendant l'attente, vérifiez le Job avec `kubectl get job -n bioinformatics "nextflow-$RUN_ID"` avant toute relance; le Job peut continuer dans Kapsule. Contrôlez le rapport `multiqc/star_salmon/multiqc_report.html` dans le bucket de résultats indiqué par `make outputs`.
+Si le terminal perd la connexion pendant que vous suivez le run, vérifiez le Job avec `kubectl get job -n bioinformatics "nextflow-$RUN_ID"` avant toute action; le Job peut continuer dans Kapsule. Contrôlez le rapport `multiqc/star_salmon/multiqc_report.html` dans le bucket de résultats indiqué par `make outputs`.
 
 ## Nettoyage et limites
 

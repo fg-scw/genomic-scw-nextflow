@@ -10,13 +10,43 @@ kubectl describe job -n bioinformatics <job>
 kubectl get events -n bioinformatics --sort-by=.lastTimestamp
 ```
 
-Pour reprendre un run, conserver le même `RUN_ID` et ne passer `RESUME=1` qu'après contrôle du workdir et des sorties intermédiaires :
+Le run est déclaré dans `kubernetes/run/run.env`. Copiez `run.env.example`, renseignez `RUN_ID`, `INPUT`, `OUTDIR`, `RUN_RESUME=0`, `NF_PROFILE=scaleway_kapsule` et `AWS_DEFAULT_REGION=fr-par`, puis appliquez le Job :
 
 ```bash
-make run RUN_ID=<run-id> INPUT=s3://bucket/path/samplesheet.csv RESUME=1
+cp kubernetes/run/run.env.example kubernetes/run/run.env
+# Modifier kubernetes/run/run.env
+make run
 ```
 
-Le runner conserve l'UUID de session Nextflow dans le PVC workdir, sous `.nextflow/sessions/<RUN_ID>`, puis passe cet UUID à `-resume`. Pour un run échoué créé avant ce suivi, retrouver son UUID dans l'historique ou le log Nextflow et créer ce fichier sur le PVC avant `RESUME=1`; le runner refuse de deviner la session globale la plus récente.
+`make run` lance `kubectl apply -k kubernetes/run` et retourne sans attendre Nextflow. Le Job s'appelle `nextflow-<RUN_ID>`. Kustomize crée un ConfigMap dont le nom inclut le hash de la configuration; les runs gardent ainsi des configurations distinctes. Un Job Kubernetes existant ne peut pas être modifié en place. Les ConfigMaps hashés restent après le run; nettoyez-les explicitement lorsqu’aucun Job ne les utilise plus.
+
+Pour reprendre un échec, conservez le même `RUN_ID`, contrôlez l'état terminal du Job et le workdir SFS, réglez `RUN_RESUME=1`, puis supprimez le Job terminal avant de réappliquer. N'effacez jamais un Job qui tourne : cela interrompt le pipeline.
+
+```bash
+kubectl get job -n bioinformatics "nextflow-$RUN_ID"
+# Après confirmation de Failed ou Complete :
+kubectl delete job -n bioinformatics "nextflow-$RUN_ID"
+kubectl apply -k kubernetes/run
+```
+
+Le runner conserve l'UUID de session Nextflow dans le PVC workdir, sous `.nextflow/sessions/<RUN_ID>`, puis le passe à `-resume`. Pour un run échoué créé avant ce suivi, retrouvez son UUID dans l'historique ou le log Nextflow et créez ce fichier sur le PVC avant `RUN_RESUME=1`; le runner refuse de choisir la session globale la plus récente.
+
+La référence s'installe avec `make reference` sur le pool orchestrator; cette cible rend la main après la création du Job. Attendez explicitement son état Complete avant de lancer Nextflow :
+
+```bash
+kubectl wait -n bioinformatics --for=condition=complete job/reference-bootstrap-ensembl-110 --timeout=6h
+```
+
+`make reference` est idempotent si la configuration n'a pas changé. Si une modification provoque une erreur de template immuable, vérifiez que le Job est `Failed` ou `Complete`, supprimez-le et relancez `make reference`. Ne supprimez jamais un Job actif :
+
+```bash
+kubectl get job -n bioinformatics reference-bootstrap-ensembl-110
+# Seulement si la condition du Job est Failed ou Complete :
+kubectl delete job -n bioinformatics reference-bootstrap-ensembl-110
+make reference
+```
+
+Le Job Nextflow vérifie aussi la référence dans son init container avant d'exécuter Nextflow.
 
 ## Incidents rencontrés
 
@@ -27,12 +57,12 @@ Le runner conserve l'UUID de session Nextflow dans le PVC workdir, sous `.nextfl
 | Plugin absent ou configuration refusée | Le plugin doit être déclaré avec sa version. | Utiliser `id 'name@version'` dans `nextflow.config`. |
 | Conflit de nom ou rapports obsolètes pendant `-resume` | `-name` imposé ou Nextflow refuse d'écraser les fichiers trace/report/timeline existants. | Garder le même `RUN_ID`/workdir sans `-name`; activer `report.overwrite = true`, `timeline.overwrite = true` et `trace.overwrite = true`. |
 | Autoscaler évince le head Nextflow | Pod head considéré comme évictable. | Annoter le head `cluster-autoscaler.kubernetes.io/safe-to-evict: "false"`. |
-| STAR rapporte moins de 50 000 entrées sur le sous-ensemble démo | TrimGalore élimine quelques reads avant l'alignement. | Le validateur exige au moins 45 000 entrées STAR (90 % des 50 000 paires brutes) et affiche séparément le sous-ensemble brut et le compte après trimming. |
+| Seuil de 45 000 entrées STAR sur l'ancien sous-ensemble démo | TrimGalore élimine quelques reads avant l'alignement. | Ce seuil (90 % des 50 000 paires brutes) appartenait à l'ancien validateur POC, désormais retiré; il reste un constat historique et n'est pas appliqué aux Jobs actuels. |
 | L'ancien validateur du POC échouait sur macOS avec une classe awk non terminée | Slash non échappé dans une classe regex awk. | Le correctif séparait les clés S3 avec `awk -F/` et comparait les champs chemin. |
 | L'ancien validateur du POC ne trouvait pas `quant.sf` | Le chemin supposé incluait `/salmon/`; nf-core/rnaseq 3.14.0 publie `star_salmon/<sample>/quant.sf`. | Le validateur a été corrigé d'après les clés S3 réelles du pipeline. |
 | Pod STAR reste `Terminating` en état D/I/O | Processus bloqué en attente d'I/O sur le stockage. | Attendre sa disparition effective avant reprise; inspecter nœud et stockage, ne pas le supprimer de force. |
 | Fichiers STAR subsistent sur `/scratch` après interruption | Le scratch `hostPath` est local au nœud; l'arrêt brutal peut empêcher le nettoyage de la tâche. | Reprendre depuis le workdir SFS avec le même `RUN_ID`; ne pas compter sur ces fichiers. Le remplacement du nœud les perd. |
-| Garde scratch échoue dans l'image STAR | L'image ne contient pas `stat`. | Le garde lit `/proc/mounts` et `df` pour vérifier ext4, le périphérique distinct, l'écriture et 60 GiB libres avant chaque pod STAR; il s'appliquera aux prochains runs. |
+| Garde scratch échoue dans l'image STAR | L'image ne contient pas `stat`. | Le garde courant lit `/proc/mounts` et `df` dans chaque pod STAR pour vérifier ext4, le périphérique distinct, l'écriture et 60 GiB libres. Il manquait dans le ConfigMap du run de reprise GEN3; `/scratch` y a été contrôlé manuellement. |
 | Référence SFS lente à revérifier après succès | Un SHA complet relisait FASTA et GTF à chaque bootstrap. | Ancien manifeste : migration avec SHA en 11 min 46 s; lancement suivant, contrôle tailles en 13 s sans SHA. Absence/troncature échoue; corruption à taille identique non détectée, donc SHA périodique en production. |
 | Nœud GEN3 remplacé pendant STAR | Le scratch est local au nœud. | Observé à 11:12:46 UTC : Nextflow a repris automatiquement `gen3-recovery-20260926` sur `bbfe88`; contrôle manuel dans le pod : `root=overlay`, `/scratch=/dev/sdb ext4`, ~145,6 GiB. Job terminé à 11:50:16 UTC et validation passée : quatre BAM et featureCounts identiques octet par octet au premier GEN3; Salmon 10 040 transcrits non nuls. Le garde par pod n'était pas dans le ConfigMap de ce run. |
 | Restauration d'objet à vérifier | Un exercice limité n'équivaut pas à une reprise complète. | Suppression puis restauration d'un fichier de 1 MiB depuis SFS et S3 : SHA-256 identique (`634fbf86…dbf`); données de test nettoyées. |
