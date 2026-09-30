@@ -170,10 +170,33 @@ Les deux plans Terraform avec refresh et verrou S3 ne prévoient aucun changemen
 | --- | --- | --- | --- |
 | 08:25:10–08:25:22 | Job référence avec les nouveaux manifests | Référence SFS existante vérifiée, sans téléchargement | orchestrator |
 | 08:26:18 | `make run`, puis seconde application identique | Même UID de Job conservé, sans redémarrage | star-compute |
-| 08:27:55 | Init container du head | Référence vérifiée, code de sortie 0 | star-compute |
-| 08:27:57 | Démarrage du conteneur Nextflow | Run `smoke-native-20260930` en cours | star-compute |
+| 08:27:55–08:27:57 | Contrôle référence puis démarrage du head | Init réussi, Nextflow démarré | star-compute |
+| 08:41:16 | Création du nœud GEN3 par autoscaling | MEMORY3-X8C-64G disponible | gen3-probe |
+| 08:50:57–09:28:16 | Calcul de l'index STAR | 37 min 19 s de calcul sur scratch; tâche complète ~1 h 10 avec staging et attente | gen3-probe |
+| 09:51:08–10:16:32 | Chargement de l'index puis alignement STAR | 46 597 / 49 539 paires alignées de façon unique (94,06 %) | gen3-probe |
+| 10:16:34–~10:30:05 | Salmon, featureCounts, QC et publication | Quantifications et MultiQC publiés sur S3 | star-compute |
+| 10:28:41 | Retrait automatique du nœud GEN3 | Pool de nouveau à zéro | gen3-probe |
+| 10:30:14 | Fin du Job | `Complete`, 45 tâches terminées avec code 0 | star-compute |
 
-Ce run reprend le même jeu ENA de 50 000 paires décrit ci-dessous, avec `NF_PROFILE=scaleway_kapsule,gen3_scratch_benchmark`. Le pool GEN3 doit être créé à la demande par les tâches STAR; leur garde `/scratch` doit réussir avant le calcul. Le démarrage est validé, le résultat complet reste à vérifier. Fermer le terminal ne suspend pas le Job; les contrôles peuvent être espacés de 30 minutes avec `kubectl get job` et `kubectl logs`.
+**Durée : 2 h 03 min 56 s**, contre 3 h 31 min 17 s lors de l'essai POP2/SFS du 29 septembre (~41 % de temps total en moins). La comparaison change à la fois le type de CPU et le stockage temporaire; elle n'isole donc pas le gain du NVMe. La lecture de l'index pour l'alignement reste sur SFS : le chargement dure encore ~22 min 32 s, puis l'alignement final du petit jeu dure 3 s. L'index calculé sur scratch doit aussi revenir sur SFS; le temps de tâche inclut ces transferts.
+
+Le run `smoke-native-20260930` utilise le même échantillon public ENA SRR1039508 décrit ci-dessous : 50 000 paires humaines de 63 bases, deux FASTQ gz totalisant 5 226 949 octets, `unstranded`, référence GRCh38 Ensembl 110. Le profil est `scaleway_kapsule,gen3_scratch_benchmark`. Les deux pods STAR ont confirmé `/scratch=/dev/sdb`, ext4, inscriptible, distinct du système, avec ~145,6 GiB libres. Le contrôle par pod est donc validé sur ce nouveau nœud.
+
+Les sorties S3 ont été contrôlées : **389 objets, 557 258 837 octets**, BAM et index BAM présents, logs STAR, featureCounts, `quant.sf` et rapport HTML MultiQC lisibles. STAR garde 49 539 paires après filtrage; featureCounts affecte 43 428 fragments. Salmon donne **10 036 transcrits non nuls**, contre 10 029 le 29 septembre. Ces résultats valident le parcours technique sur un petit échantillon; l'écart Salmon et les seuils biologiques restent à qualifier. Les avertissements temporaires de scheduling ont été résolus par l'autoscaling et la file d'attente; aucune tâche n'a échoué.
+
+**Coût estimé sur la durée du run : environ 2,7 € HT**, hors arrondis de facturation et postes non chiffrés. Les prix des nœuds ont été vérifiés via l'API Scaleway `instance server-type list` dans chaque zone; la page web affiche par défaut PAR-1.
+
+| Ressource | Tarif HT | Durée retenue | Estimation |
+| --- | ---: | ---: | ---: |
+| orchestrator POP2-4C-16G, fr-par-3 | 0,2205 €/h | 2 h 03 min 56 s | 0,46 € |
+| star-compute POP2-HM-8C-64G, fr-par-3 | 0,618 €/h | 08:26:39–10:30:14 | 1,27 € |
+| gen3-probe MEMORY3-X8C-64G, fr-par-2 | 0,4532 €/h | 08:41:16–10:28:41 | 0,81 € |
+| SFS référence + workdir, 250 Go | 0,000221 €/Go/h | 2 h 03 min 56 s | 0,11 € |
+| Disques système Block 5K, 20 Go par nœud | 0,000130 €/Go/h | Durées des nœuds ci-dessus | ~0,02 € |
+
+Sources : [tarifs Instances Scaleway](https://www.scaleway.com/en/pricing/virtual-instances/) et [stockage Scaleway](https://www.scaleway.com/en/pricing/storage/). Object Storage, IPv4, Secret Manager et une éventuelle tarification du scratch ne sont pas inclus dans cette estimation; les volumes existants et leurs anciennes versions ne sont pas attribués à ce seul run. Les horaires Kubernetes bornent la durée GEN3; le début/fin de facturation peut différer. L'orchestrator, SFS et le nœud star-compute encore présent à la fin restent facturés après 10:30:14 jusqu'à leur éventuel retrait. Ce montant **n'est pas une facture**, ni le coût d'un provisionnement neuf.
+
+Pour reproduire le test, suivez « Refaire le test » ci-dessous et remplacez la ligne de `run.env` par `NF_PROFILE=scaleway_kapsule,gen3_scratch_benchmark`. Fermer le terminal ne suspend pas le Job; `kubectl get job` et `kubectl logs` suffisent pour reprendre le suivi. Seule la ConfigMap propre à ce run a été supprimée après succès; les PVC et résultats sont conservés.
 
 ## Essai observé le 29 septembre 2026
 
