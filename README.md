@@ -5,32 +5,38 @@ Terraform déploie Kapsule **1.37.0**, les pools et le stockage. Kubernetes lanc
 ## Architecture
 
 ```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 35, "subGraphTitleMargin": {"top": 10, "bottom": 15}}}}%%
 flowchart TB
-  S3[("S3 hors cluster<br/>FASTQ, samplesheet et résultats")]
+  S3[("S3 hors cluster<br/>Entrées et résultats")]
+
   subgraph K["Cluster Kapsule"]
-    subgraph W["Worker nodes — représentation des pools"]
-      direction LR
+    subgraph W["Worker nodes / pools"]
+      direction TB
       subgraph O["POP2 / orchestrator"]
-        OP["Pod installation référence"]
-        OB[("Block Storage<br/>système du worker")]
+        direction TB
+        OP["Installation référence"]
+        OB[("Block Storage<br/>système")]
         OP ~~~ OB
       end
       subgraph P["POP2 / star-compute"]
-        PP["Head Nextflow<br/>Pods Salmon et QC"]
-        PB[("Block Storage<br/>système de chaque worker")]
+        direction TB
+        PP["Head Nextflow<br/>Salmon et QC"]
+        PB[("Block Storage<br/>par worker")]
         PP ~~~ PB
       end
       subgraph G["MEMORY3 / gen3-probe"]
-        GP["Pods STAR<br/>index et alignement"]
-        GB[("Block Storage<br/>système du worker")]
-        GN[("NVMe local /scratch<br/>hostPath des pods STAR")]
+        direction TB
+        GP["Index et alignement STAR"]
+        GB[("Block Storage<br/>système")]
+        GN[("NVMe local /scratch")]
         GP ~~~ GB ~~~ GN
       end
     end
   end
-  SFS[("File Storage partagé — hors cluster<br/>référence 50 Go / workdir 200 Go")]
-  S3 <-->|"entrées / publication"| W
-  W ---|"montages PVC selon le rôle"| SFS
+
+  SFS[("File Storage hors cluster<br/>Référence et workdir partagés")]
+  S3 <-->|Entrées et publication| W
+  W ---|PVC montés selon le rôle| SFS
 ```
 
 Le diagramme correspond au profil GEN3 du test. Avec `scaleway_kapsule` seul, STAR tourne aussi sur POP2.
