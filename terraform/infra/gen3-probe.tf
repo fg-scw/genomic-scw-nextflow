@@ -1,5 +1,5 @@
 # Optional GEN3 scratch benchmark pool. Keep it idle between runs and isolated
-# from normal pipeline pods; a matching preflight Job can trigger scale-up.
+# from normal pipeline pods; matching STAR pods trigger scale-up.
 resource "scaleway_k8s_pool" "gen3_probe" {
   cluster_id       = scaleway_k8s_cluster.main.id
   version          = scaleway_k8s_cluster.main.version
