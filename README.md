@@ -5,31 +5,46 @@ Terraform déploie Kapsule **1.37.0**, les pools et le stockage. Kubernetes lanc
 ## Architecture
 
 ```mermaid
-flowchart LR
-  IN[("S3 : FASTQ et samplesheet")] --> HEAD
-  subgraph K["Kapsule"]
-    REFJOB["orchestrator / POP2<br/>installation référence"]
-    HEAD["star-compute / POP2<br/>head Nextflow"]
-    QC["star-compute / POP2<br/>Salmon et QC"]
-    STAR["gen3-probe / MEMORY3<br/>index et alignement STAR"]
-    NVME[("NVMe /scratch<br/>temporaire, hostPath")]
-    HEAD --> STAR
-    HEAD --> QC
-    STAR <--> NVME
+flowchart TB
+  S3[("S3 hors cluster<br/>FASTQ, samplesheet et résultats")]
+  subgraph K["Cluster Kapsule"]
+    subgraph W["Worker nodes — représentation des pools"]
+      direction LR
+      subgraph O["POP2 / orchestrator"]
+        OP["Pod installation référence"]
+        OB[("Block Storage<br/>système du worker")]
+        OP ~~~ OB
+      end
+      subgraph P["POP2 / star-compute"]
+        PP["Head Nextflow<br/>Pods Salmon et QC"]
+        PB[("Block Storage<br/>système de chaque worker")]
+        PP ~~~ PB
+      end
+      subgraph G["MEMORY3 / gen3-probe"]
+        GP["Pods STAR<br/>index et alignement"]
+        GB[("Block Storage<br/>système du worker")]
+        GN[("NVMe local /scratch<br/>hostPath des pods STAR")]
+        GP ~~~ GB ~~~ GN
+      end
+    end
   end
-  REFJOB --> REF[("File Storage : référence / 50 Go")]
-  REF --> HEAD
-  REF --> STAR
-  REF --> QC
-  WORK[("File Storage : workdir / 200 Go")] <--> HEAD
-  WORK <--> STAR
-  WORK <--> QC
-  IN --> QC
-  HEAD --> OUT[("S3 : résultats")]
-  BLOCK[("Block Storage : système des nœuds")] --- K
+  SFS[("File Storage partagé — hors cluster<br/>référence 50 Go / workdir 200 Go")]
+  S3 <-->|"entrées / publication"| W
+  W ---|"montages PVC selon le rôle"| SFS
 ```
 
-Le diagramme correspond au profil GEN3 du test. Le profil `scaleway_kapsule` seul place aussi STAR sur POP2. Le NVMe accélère le travail temporaire; SFS conserve les sorties de tâches et la session nécessaires à la reprise. Block Storage sert aux disques système, sans PVC Block dédié au calcul.
+Le diagramme correspond au profil GEN3 du test. Avec `scaleway_kapsule` seul, STAR tourne aussi sur POP2.
+
+### Stockage : rôle et moment d'utilisation
+
+| Stockage | Où / données | Quand il intervient |
+| --- | --- | --- |
+| **Block Storage** | Disque système de chaque worker (20 Go) | Dès le démarrage du nœud : OS, images et runtime Kubernetes. Aucun PVC Block dédié au calcul. |
+| **NVMe scratch** | Local au worker GEN3, exposé aux pods STAR via `/scratch` | Pendant l'indexation et l'alignement : fichiers temporaires. Les sorties déclarées reviennent sur SFS avant fin de tâche; le scratch ne sert pas à la reprise. |
+| **File Storage — référence** | SFS 50 Go, monté sur plusieurs workers | Installation initiale de FASTA/GTF, contrôle avant le run, lecture par les tâches. L'orchestrator monte uniquement ce SFS. |
+| **File Storage — workdir** | SFS 200 Go, partagé entre les workers de calcul | Pendant tout le run : sorties de tâches, index STAR, cache et session Nextflow. Relu lors d'une reprise; l'alignement lit encore l'index depuis SFS. |
+| **S3 — données** | Buckets hors du cluster : FASTQ, samplesheet et résultats | Entrées au lancement et au staging; publication des BAM, quantifications et MultiQC après les tâches. Les résultats restent disponibles après retrait des workers. |
+| **S3 — état Terraform** | Bucket séparé, hors du cluster | Pendant les commandes Terraform : état partagé et verrou. Sans rôle dans le calcul Nextflow. |
 
 ## Prérequis
 
